@@ -1,0 +1,41 @@
+# Environment — never commit secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Build / packaging
+dist/
+build/
+*.egg-info/
+
+# Test / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Temp debug scripts (prefixed with _)
+_*.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Project-internal assistant config
+CLAUDE.md
