@@ -85,7 +85,6 @@ def _grounding_score(
 ) -> float:
     """Fraction of JD requirements mentioned in draft that are backed by profile evidence."""
     draft_lower = draft.lower()
-    # Requirements actually claimed in the draft
     claimed = [r.strip().lower() for r in requirements if r.strip().lower() in draft_lower]
     if not claimed:
         return 1.0
@@ -99,6 +98,30 @@ def _grounding_score(
 
     grounded = sum(1 for c in claimed if c in evidence or c in exp_lower)
     return round(grounded / len(claimed), 4)
+
+
+def _find_unsupported_claims(
+    draft: str,
+    requirements: list[str],
+    profile_skills: list[str],
+    project_techs: list[str],
+    experience_text: str,
+) -> list[str]:
+    """Return display-form requirements claimed in draft but NOT backed by profile evidence."""
+    draft_lower = draft.lower()
+    evidence: set[str] = set()
+    for s in profile_skills:
+        evidence.add(s.strip().lower())
+    for t in project_techs:
+        evidence.add(t.strip().lower())
+    exp_lower = experience_text.lower()
+    return [
+        r.strip()
+        for r in requirements
+        if r.strip().lower() in draft_lower
+        and r.strip().lower() not in evidence
+        and r.strip().lower() not in exp_lower
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -303,12 +326,27 @@ class ApplicationService(BaseService):
             edu_bullets = "\n".join(f"  - {e}" for e in edu_parts)
 
         reqs_str = ", ".join(str(r) for r in (posting.requirements or []))
+
+        # Explicit whitelist — the LLM may only draw from verified profile terms
+        allowed_set = set(skills) | set(project_techs)
+        if allowed_set:
+            allowed_str = ", ".join(sorted(allowed_set))
+            whitelist_rule = (
+                f"VERIFIED SKILL WHITELIST: {allowed_str}. "
+                "You may ONLY reference technologies and skills from this list. "
+                "If the JD requires something not on this list, omit it entirely — "
+                "never claim a skill the candidate cannot demonstrate in an interview."
+            )
+        else:
+            whitelist_rule = (
+                "No confirmed skills — write only what the experience bullets explicitly describe. "
+                "Do not infer or assume any technical skills."
+            )
+
         system_msg = (
-            "You are a career advisor for internship applicants. "
-            "Generate tailored application documents grounded STRICTLY in the candidate's real experience. "
-            "DO NOT invent, assume, or fabricate any skills, projects, or experience not explicitly listed. "
-            "Mirror JD keywords ONLY where the candidate genuinely has them. "
-            "Use specific bullets: action verb + tool/skill + scope/context + outcome (quantify where possible)."
+            "You are a career advisor for internship applicants writing a tailored application document. "
+            f"{whitelist_rule} "
+            "Use specific bullets: action verb + verified skill + scope + measurable outcome."
         )
         user_msg = (
             f"Generate a {artifact_type} for this internship application.\n\n"
@@ -340,13 +378,35 @@ class ApplicationService(BaseService):
 
         keywords = [str(r) for r in (posting.requirements or [])]
         ats, missing = _compute_ats(keywords, content_text)
-        gs = _grounding_score(
-            content_text,
-            keywords,
-            skills,
-            project_techs,
-            experience_text,
-        )
+        gs = _grounding_score(content_text, keywords, skills, project_techs, experience_text)
+
+        # Guard loop: if grounding is still low and the profile has verifiable evidence,
+        # show the LLM exactly which claims to remove and regenerate once.
+        if gs < 0.7 and (skills or project_techs):
+            unsupported = _find_unsupported_claims(
+                content_text, keywords, skills, project_techs, experience_text
+            )
+            if unsupported:
+                names = ", ".join(unsupported)
+                retry_msg = (
+                    f"Your draft mentioned {names}. "
+                    "The candidate does NOT have these — they are not on the verified whitelist. "
+                    f"Remove every reference to {names} and rewrite using only the whitelist skills. "
+                    "Output only the corrected document."
+                )
+                try:
+                    content_text = await complete([
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": user_msg},
+                        {"role": "assistant", "content": content_text},
+                        {"role": "user", "content": retry_msg},
+                    ])
+                    ats, missing = _compute_ats(keywords, content_text)
+                    gs = _grounding_score(
+                        content_text, keywords, skills, project_techs, experience_text
+                    )
+                except Exception as exc:
+                    logger.warning("draft retry failed, keeping first attempt: %s", exc)
 
         artifact = Artifact(
             user_id=self.user_id,

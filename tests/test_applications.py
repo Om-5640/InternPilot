@@ -285,6 +285,72 @@ async def test_draft_creates_artifact(
 
 
 @pytest.mark.asyncio
+async def test_draft_guard_loop_retries_on_fabrication(
+    client: AsyncClient,
+    db: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Guard loop fires when first draft claims skills the profile doesn't have."""
+    # Seed a profile with ONLY Python + FastAPI
+    await client.get("/api/profile", headers=auth_headers)  # auto-create
+    await client.put(
+        "/api/profile",
+        json={"skills": ["Python", "FastAPI"]},
+        headers=auth_headers,
+    )
+
+    # Posting requires Python, FastAPI, AND Kubernetes (candidate lacks Kubernetes)
+    _, posting = await _seed_posting(
+        db, requirements=["Python", "FastAPI", "Kubernetes"]
+    )
+
+    # First call: fabricated Kubernetes → gs = 2/3 = 0.67 < 0.7 → retry triggers
+    bad_draft = "Expert in Python, FastAPI, and Kubernetes infrastructure."
+    # Second call (correction): clean draft without Kubernetes → gs = 2/2 = 1.0
+    good_draft = "Strong Python and FastAPI developer with backend experience."
+
+    with patch("app.llm.router.complete", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = [bad_draft, good_draft]
+        resp = await client.post(
+            "/api/applications/draft",
+            json={"posting_id": str(posting.id), "type": "cover_letter", "channel": "portal"},
+            headers=auth_headers,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert mock_llm.call_count == 2  # retry was triggered
+    artifact = resp.json()["artifact"]
+    assert artifact["content"] == good_draft
+    assert artifact["grounding_score"] >= 0.7
+    # Kubernetes should not be in the corrected draft → not missing from ATS perspective only
+    # but must not be falsely claimed
+    assert "Kubernetes" not in artifact["content"]
+
+
+@pytest.mark.asyncio
+async def test_draft_no_retry_when_no_profile_evidence(
+    client: AsyncClient,
+    db: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Guard loop must NOT fire when profile has no verified skills — nothing to verify against."""
+    # Fresh user, no profile update → skills = [], project_techs = []
+    _, posting = await _seed_posting(db, requirements=["Python", "Kubernetes"])
+    any_draft = "I have experience with Python and Kubernetes."
+
+    with patch("app.llm.router.complete", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = any_draft
+        resp = await client.post(
+            "/api/applications/draft",
+            json={"posting_id": str(posting.id), "type": "email", "channel": "email"},
+            headers=auth_headers,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert mock_llm.call_count == 1  # no retry — no profile evidence to verify against
+
+
+@pytest.mark.asyncio
 async def test_draft_invalid_type_400(
     client: AsyncClient,
     db: AsyncSession,
