@@ -25,6 +25,20 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
     create_async_engine,
 )
 
+# Register all models with SQLAlchemy's mapper before any ORM query fires
+import app.models.application  # noqa: E402, F401
+import app.models.artifact  # noqa: E402, F401
+import app.models.company  # noqa: E402, F401
+import app.models.contact  # noqa: E402, F401
+import app.models.evaluation  # noqa: E402, F401
+import app.models.interview_prep  # noqa: E402, F401
+import app.models.notification  # noqa: E402, F401
+import app.models.outcome  # noqa: E402, F401
+import app.models.posting  # noqa: E402, F401
+import app.models.profile  # noqa: E402, F401
+import app.models.referral  # noqa: E402, F401
+import app.models.research_outreach  # noqa: E402, F401
+import app.models.user  # noqa: E402, F401
 from app.core.config import settings  # noqa: E402
 from app.models.research_opportunity import ResearchOpportunity  # noqa: E402
 from app.services.research_service import create_opportunity  # noqa: E402
@@ -394,7 +408,7 @@ _OPPORTUNITIES: list[dict] = [
 
 
 async def main(reset: bool = False) -> None:
-    engine = create_async_engine(settings.database_url, echo=False)
+    engine = create_async_engine(settings.DATABASE_URL, echo=False)
     async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as db:

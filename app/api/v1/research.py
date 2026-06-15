@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.application import ArtifactSchema
+from app.schemas.application import ArtifactSchema, coerce_artifact_schema
 from app.schemas.research import (
     CreateOutreachRequest,
     PitchRequest,
@@ -67,7 +67,7 @@ async def draft_research_pitch(
 ) -> ArtifactSchema:
     svc = ResearchService(db, current_user.id)
     artifact = await svc.draft_pitch(body.opportunity_id)
-    return ArtifactSchema.model_validate(artifact)
+    return coerce_artifact_schema(artifact)
 
 
 # ---------------------------------------------------------------------------
