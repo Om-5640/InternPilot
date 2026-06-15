@@ -35,6 +35,12 @@ from app.models.outcome import Outcome  # noqa: F401 — register model with Bas
 from app.models.posting import Posting  # noqa: F401 — register model with Base.metadata
 from app.models.profile import Profile  # noqa: F401 — register model with Base.metadata
 from app.models.referral import Referral  # noqa: F401 — register model with Base.metadata
+from app.models.research_opportunity import (
+    ResearchOpportunity,  # noqa: F401 — register model with Base.metadata
+)
+from app.models.research_outreach import (
+    ResearchOutreach,  # noqa: F401 — register model with Base.metadata
+)
 from app.models.user import User  # noqa: F401 — register model with Base.metadata
 
 TEST_DATABASE_URL = os.environ.get(
@@ -84,7 +90,8 @@ async def db(test_engine):
     async with test_engine.begin() as conn:
         await conn.execute(
             text(
-                "TRUNCATE TABLE notifications, evaluations, referrals, contacts_alumni, outcomes, "
+                "TRUNCATE TABLE research_outreach, research_opportunities, notifications, "
+                "evaluations, referrals, contacts_alumni, outcomes, "
                 "artifacts, applications, postings, profiles, companies, users "
                 "RESTART IDENTITY CASCADE"
             )

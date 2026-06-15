@@ -23,6 +23,7 @@ from app.api.v1 import notifications as notifications_router
 from app.api.v1 import postings as postings_router
 from app.api.v1 import profile as profile_router
 from app.api.v1 import referrals as referrals_router
+from app.api.v1 import research as research_router
 from app.core.config import settings
 from app.core.database import engine
 from app.core.errors import (
@@ -100,3 +101,4 @@ app.include_router(interview_prep_router.router, prefix="/api")
 app.include_router(evaluation_router.router, prefix="/api")
 app.include_router(dashboard_router.router, prefix="/api")
 app.include_router(notifications_router.router, prefix="/api")
+app.include_router(research_router.router, prefix="/api")

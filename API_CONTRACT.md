@@ -397,6 +397,79 @@ platform_iq + iq_trend are GLOBAL aggregates (not user-scoped). All other dashbo
 
 ---
 
+## Module 12 — Research Internships
+
+### Data types
+
+```ts
+interface ResearchOpportunity {
+  id: string;
+  professor_name: string;
+  institution: string;
+  lab_name: string | null;
+  research_area: string;
+  description: string;
+  desired_skills: string[];
+  program: string | null;
+  region: string | null;
+  contact_email: string | null;
+  url: string | null;
+  source: string;
+  posted_at: string | null;
+  last_seen_at: string;
+  created_at: string;
+}
+
+interface ResearchMatch {
+  opportunity: ResearchOpportunity;
+  fit_score: float;         // 0..1 — 0.7×semantic_sim + 0.3×skill_overlap
+  fit_explanation: string;  // human-readable, grounded; no fabricated skills
+  matched_skills: string[];
+  missing_skills: string[];
+}
+
+type OutreachStatus = "suggested" | "drafted" | "contacted" | "replied" | "accepted" | "declined" | "no_response";
+
+interface ResearchOutreach {
+  id: string;
+  user_id: string;
+  research_opportunity_id: string;
+  status: OutreachStatus;
+  pitch_artifact_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+```
+
+### Endpoints
+
+| Method | Path | Auth | Status | Description |
+|--------|------|------|--------|-------------|
+| GET | `/research/opportunities` | ✓ | 200 | Ranked feed — `{ data: ResearchMatch[], page, limit, total }` |
+| GET | `/research/opportunities/{id}` | ✓ | 200/404 | Single match detail |
+| POST | `/research/pitch` | ✓ | 200 | Generate cold-email pitch → Artifact (type="research_pitch") |
+| POST | `/research/outreach` | ✓ | 201 | Create outreach record |
+| GET | `/research/outreach` | ✓ | 200 | List user's outreach — `{ data: ResearchOutreach[] }` |
+| PUT | `/research/outreach/{id}` | ✓ | 200/400/404 | Update outreach status |
+
+**POST /research/pitch** body: `{ opportunity_id: string }`  
+Returns: `Artifact` (same shape as application artifacts — has `content`, `type="research_pitch"`, `grounding_score`)
+
+**POST /research/outreach** body: `{ opportunity_id: string, pitch_artifact_id?: string }`  
+Status defaults to `"suggested"` when no `pitch_artifact_id`; `"drafted"` when one is provided.
+
+**PUT /research/outreach/{id}** body: `{ status: OutreachStatus }`  
+Returns 400 `INVALID_STATUS` if status is not a valid OutreachStatus. Returns 404 `OUTREACH_NOT_FOUND` if not owned by current user.
+
+*Notes:*  
+- `research_opportunities` is **GLOBAL** reference data — not user-scoped; all users see the same table.  
+- `research_outreach` is **USER-OWNED** — scoped to `user_id`, same isolation rules as applications.  
+- Ranking uses cosine similarity between the user's `research_interests` embedding and opportunity embeddings (pgvector `<=>`).  
+- Pitch generation uses the LLM fallback router with a whitelist guard and grounding check — no fabricated skills.  
+- **Honest limitation:** no live paper-fetch API; pitch specificity is bounded by the seeded description.
+
+---
+
 ## 3. How v0 and Claude use this
 
 - **v0 builds the UI against the 🟦 endpoints only**, using the exact object shapes in §1. It never assumes a field that isn't defined here. While the backend is being built, v0 mocks these responses with the §1 shapes.
