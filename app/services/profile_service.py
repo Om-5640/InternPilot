@@ -30,6 +30,7 @@ from app.schemas.profile import (
     ResumeExtract,
 )
 from app.services.base import BaseService
+from app.services.university_normalizer import canonicalize as _canonicalize_uni
 
 _MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB
 _MIN_TEXT_LEN = 50
@@ -76,6 +77,9 @@ def _profile_text(profile: Profile) -> str:
     for skill in profile.skills or []:
         if isinstance(skill, str):
             parts.append(skill)
+    for interest in profile.research_interests or []:
+        if isinstance(interest, str):
+            parts.append(interest)
     for proj in profile.projects or []:
         if isinstance(proj, dict):
             if proj.get("name"):
@@ -166,6 +170,11 @@ class ProfileService(BaseService):
 
     async def _save(self, profile: Profile) -> Profile:
         """Compute strength/gaps, persist, refresh, then recompute embedding."""
+        profile.university_canonical = (
+            _canonicalize_uni(profile.university) or None
+            if profile.university
+            else None
+        )
         profile.profile_strength, profile.gaps = _compute_strength_and_gaps(profile)
         text = _profile_text(profile)
         if text.strip():
@@ -212,6 +221,12 @@ class ProfileService(BaseService):
             instructions=(
                 "Extract the candidate's professional information from this résumé.\n\n"
                 "Rules:\n"
+                "- university: extract the candidate's university/college name if present.\n"
+                "- grad_year: extract the expected or actual graduation year as an integer "
+                "(e.g. 2025, 2026). If not explicitly stated, infer from education entries.\n"
+                "- research_interests: list any research areas, academic interests, or "
+                "specialisations mentioned (e.g. 'machine learning', 'computer vision', "
+                "'distributed systems'). Empty list if none found.\n"
                 "- github_url: extract verbatim if present (e.g. 'github.com/username' → "
                 "'https://github.com/username').\n"
                 "- domains: infer 2-4 professional domains from skills and experience "
@@ -227,6 +242,12 @@ class ProfileService(BaseService):
 
         if extracted.headline:
             profile.headline = extracted.headline
+        if extracted.university:
+            profile.university = extracted.university
+        if extracted.grad_year:
+            profile.grad_year = extracted.grad_year
+        if extracted.research_interests:
+            profile.research_interests = extracted.research_interests
         if extracted.skills:
             existing: set[str] = {s for s in (profile.skills or []) if isinstance(s, str)}
             profile.skills = list(existing | set(extracted.skills))
@@ -318,7 +339,7 @@ class ProfileService(BaseService):
         profile = await self.get_or_create()
         update = body.model_dump(exclude_unset=True)
 
-        for field in ("headline", "skills", "github_url"):
+        for field in ("headline", "university", "grad_year", "research_interests", "skills", "github_url"):
             if field in update:
                 setattr(profile, field, update[field])
 

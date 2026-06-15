@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import String
+from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -21,4 +21,7 @@ class Company(Base, TimestampMixin):
     )
     ghost_history_score: Mapped[float] = mapped_column(
         nullable=False, default=0.0, server_default="0"
+    )
+    cohort_applied_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
     )

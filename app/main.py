@@ -14,9 +14,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1 import applications as applications_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import health as health_router
+from app.api.v1 import integrations as integrations_router
+from app.api.v1 import interview_prep as interview_prep_router
 from app.api.v1 import matches as matches_router
 from app.api.v1 import postings as postings_router
 from app.api.v1 import profile as profile_router
+from app.api.v1 import referrals as referrals_router
 from app.core.config import settings
 from app.core.database import engine
 from app.core.errors import (
@@ -88,3 +91,6 @@ app.include_router(profile_router.router, prefix="/api")
 app.include_router(postings_router.router, prefix="/api")
 app.include_router(matches_router.router, prefix="/api")
 app.include_router(applications_router.router, prefix="/api")
+app.include_router(integrations_router.router, prefix="/api")
+app.include_router(referrals_router.router, prefix="/api")
+app.include_router(interview_prep_router.router, prefix="/api")

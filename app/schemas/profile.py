@@ -80,6 +80,9 @@ class ProfileSchema(BaseModel):
 
     user_id: uuid.UUID
     headline: str | None
+    university: str | None
+    grad_year: int | None
+    research_interests: list[str]
     skills: list[str]
     experience: list[ExperienceItem]
     education: list[EducationItem]
@@ -112,6 +115,9 @@ class GithubUrlRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     headline: str | None = None
+    university: str | None = None
+    grad_year: int | None = None
+    research_interests: list[str] | None = None
     skills: list[str] | None = None
     experience: list[ExperienceItem] | None = None
     education: list[EducationItem] | None = None
@@ -138,6 +144,9 @@ class StrengthResponse(BaseModel):
 
 class ResumeExtract(BaseModel):
     headline: str | None = None
+    university: str | None = None
+    grad_year: int | None = None
+    research_interests: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     experience: list[ExperienceItem] = Field(default_factory=list)
     education: list[EducationItem] = Field(default_factory=list)
@@ -156,6 +165,9 @@ def coerce_profile_schema(profile: Any) -> ProfileSchema:
     data: dict[str, Any] = {
         "user_id": profile.user_id,
         "headline": profile.headline,
+        "university": profile.university,
+        "grad_year": profile.grad_year,
+        "research_interests": profile.research_interests or [],
         "skills": profile.skills or [],
         "experience": profile.experience or [],
         "education": profile.education or [],

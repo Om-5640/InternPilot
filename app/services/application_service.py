@@ -30,7 +30,7 @@ from app.schemas.application import (
     coerce_artifact_schema,
 )
 from app.services.base import BaseService
-from app.services.matching_service import _response_likelihood_placeholder
+from app.services.matching_service import _compute_response_likelihood
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +434,7 @@ class ApplicationService(BaseService):
         artifact = await self._get_artifact_owned(artifact_id)
         posting, company = await self._get_posting_with_company(posting_id)
 
-        predicted_prob = _response_likelihood_placeholder(posting)
+        predicted_prob = _compute_response_likelihood(posting, company)
         predicted_ghost = bool(posting.is_ghost)
 
         app = Application(

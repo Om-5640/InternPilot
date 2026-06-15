@@ -37,6 +37,9 @@ class User(Base, TimestampMixin):
         default=AuthProvider.password,
         server_default=AuthProvider.password.value,
     )
+    gmail_token: Mapped[dict[str, str] | None] = mapped_column(
+        JSON, nullable=True, default=None
+    )
     # JSONB stored as JSON; default covers all three consent flags
     consent: Mapped[dict[str, bool]] = mapped_column(
         JSON,

@@ -1,7 +1,4 @@
-"""Pydantic schemas for Module 7 — Application Assistant.
-
-Shapes are matched exactly to API_CONTRACT.md.
-"""
+"""Pydantic schemas for Module 7 — Application Assistant + Module 8 — Tracker."""
 from __future__ import annotations
 
 import uuid
@@ -13,6 +10,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from app.models.application import Application
     from app.models.artifact import Artifact
+    from app.models.outcome import Outcome
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +47,33 @@ def coerce_artifact_schema(a: Artifact) -> ArtifactSchema:
 
 
 # ---------------------------------------------------------------------------
+# Outcome
+# ---------------------------------------------------------------------------
+
+
+class OutcomeSchema(BaseModel):
+    id: uuid.UUID
+    application_id: uuid.UUID
+    outcome_type: str
+    responded: bool
+    time_to_response_hours: float | None
+    source: str
+    recorded_at: datetime
+
+
+def coerce_outcome_schema(o: Outcome) -> OutcomeSchema:
+    return OutcomeSchema(
+        id=o.id,
+        application_id=o.application_id,
+        outcome_type=o.outcome_type,
+        responded=o.responded,
+        time_to_response_hours=o.time_to_response_hours,
+        source=o.source,
+        recorded_at=o.recorded_at,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 
@@ -70,7 +95,7 @@ class ApplicationSchema(BaseModel):
     predicted_ghost: bool
     applied_at: datetime | None
     last_status_at: datetime
-    outcome: None  # Module 8
+    outcome: OutcomeSchema | None
     created_at: datetime
 
 
@@ -80,6 +105,7 @@ def coerce_application_schema(
     posting_title: str,
     company_name: str,
     artifacts: list[Artifact],
+    outcome: Outcome | None = None,
 ) -> ApplicationSchema:
     return ApplicationSchema(
         id=app.id,
@@ -96,7 +122,7 @@ def coerce_application_schema(
         predicted_ghost=app.predicted_ghost,
         applied_at=app.applied_at,
         last_status_at=app.last_status_at,
-        outcome=None,
+        outcome=coerce_outcome_schema(outcome) if outcome is not None else None,
         created_at=app.created_at,
     )
 
@@ -174,15 +200,37 @@ class UpdateArtifactResponse(BaseModel):
     artifact: ArtifactSchema
 
 
+# Module 8 additions
+class RecordOutcomeRequest(BaseModel):
+    outcome_type: str
+    responded: bool
+    time_to_response_hours: float | None = None
+    source: str = "manual"
+
+
+class RecordOutcomeResponse(BaseModel):
+    outcome: OutcomeSchema
+
+
+class DraftFollowupResponse(BaseModel):
+    draft: str
+
+
+class GmailSyncResponse(BaseModel):
+    detected: int
+
+
 # ---------------------------------------------------------------------------
 # Type aliases exposed to other modules
 # ---------------------------------------------------------------------------
 
 __all__: list[Any] = [
     "ArtifactSchema",
+    "OutcomeSchema",
     "ApplicationSchema",
     "PostingSummarySchema",
     "coerce_artifact_schema",
+    "coerce_outcome_schema",
     "coerce_application_schema",
     "DecodeRequest",
     "DecodeResponse",
@@ -198,4 +246,8 @@ __all__: list[Any] = [
     "UpdateApplicationRequest",
     "UpdateArtifactRequest",
     "UpdateArtifactResponse",
+    "RecordOutcomeRequest",
+    "RecordOutcomeResponse",
+    "DraftFollowupResponse",
+    "GmailSyncResponse",
 ]

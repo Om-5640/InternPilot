@@ -21,12 +21,18 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.database import get_db
 from app.main import app
-from app.models.base import Base
 from app.models.application import Application  # noqa: F401 — register model with Base.metadata
 from app.models.artifact import Artifact  # noqa: F401 — register model with Base.metadata
+from app.models.base import Base
 from app.models.company import Company  # noqa: F401 — register model with Base.metadata
+from app.models.contact import Contact  # noqa: F401 — register model with Base.metadata
+from app.models.interview_prep import (
+    InterviewPrep,  # noqa: F401 — register model with Base.metadata
+)
+from app.models.outcome import Outcome  # noqa: F401 — register model with Base.metadata
 from app.models.posting import Posting  # noqa: F401 — register model with Base.metadata
 from app.models.profile import Profile  # noqa: F401 — register model with Base.metadata
+from app.models.referral import Referral  # noqa: F401 — register model with Base.metadata
 from app.models.user import User  # noqa: F401 — register model with Base.metadata
 
 TEST_DATABASE_URL = os.environ.get(
@@ -76,7 +82,8 @@ async def db(test_engine):
     async with test_engine.begin() as conn:
         await conn.execute(
             text(
-                "TRUNCATE TABLE artifacts, applications, postings, profiles, companies, users "
+                "TRUNCATE TABLE referrals, contacts_alumni, outcomes, artifacts, "
+                "applications, postings, profiles, companies, users "
                 "RESTART IDENTITY CASCADE"
             )
         )

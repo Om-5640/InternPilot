@@ -25,7 +25,8 @@ STRENGTH_URL = "/api/profile/strength"
 SIGNUP_URL = "/api/auth/signup"
 
 PROFILE_FIELDS = {
-    "user_id", "headline", "skills", "experience", "education",
+    "user_id", "headline", "university", "grad_year", "research_interests",
+    "skills", "experience", "education",
     "projects", "github_url", "preferences", "profile_strength",
     "gaps", "created_at", "updated_at",
 }

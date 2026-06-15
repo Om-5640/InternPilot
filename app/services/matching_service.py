@@ -1,10 +1,10 @@
-"""MatchingService — Module 3: per-user semantic matching + ranked feed.
+"""MatchingService — Module 3 + Module 5: per-user semantic matching + ranked feed.
 
 Design:
 - Postings are GLOBAL; profile + skills are per-user.
 - Matches are computed ON-THE-FLY (no persistence / no matches table).
 - Ghost scores and is_ghost are READ from the posting as-is (Module 4 populates them).
-- response_likelihood is a PLACEHOLDER freshness heuristic (Module 5 replaces it).
+- response_likelihood is computed by _compute_response_likelihood (Module 5).
 - expected_value = match_score * response_likelihood * (1 - ghost_score)
 """
 from __future__ import annotations
@@ -27,11 +27,29 @@ from app.schemas.posting import coerce_posting_schema
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Scoring constants — named so Modules 4 & 5 can find and replace them
+# Module 3 scoring constants
 # ---------------------------------------------------------------------------
 
 SEMANTIC_WEIGHT: float = 0.7
 SKILL_WEIGHT: float = 0.3
+
+# ---------------------------------------------------------------------------
+# Module 5 — Response Likelihood constants
+# ---------------------------------------------------------------------------
+
+_COHORT_MIN_APPS: int = 5          # mirrors CohortService.MIN_APPS
+
+# Annotate match_explanation when company response rate falls below this
+_LOW_RESP_RATE: float = 0.25
+
+# Data-rich weights (cohort_applied_count >= _COHORT_MIN_APPS) — sum to 1.0
+_RL_COHORT_WEIGHT: float = 0.55
+_RL_FRESH_WEIGHT: float = 0.35
+_RL_GHOST_WEIGHT: float = 0.10
+
+# Cold-start weights (no cohort data yet) — sum to 1.0
+_RL_COLD_FRESH_WEIGHT: float = 0.65
+_RL_COLD_GHOST_WEIGHT: float = 0.35
 
 
 # ---------------------------------------------------------------------------
@@ -61,38 +79,95 @@ def _compute_skill_overlap(
     return matched, missing
 
 
-def _response_likelihood_placeholder(posting: Posting) -> float:
-    # TODO Module 5 — replace with trained response-likelihood model.
-    # Placeholder: linear freshness decay from posted_at or last_seen_at.
-    # 0 days old → 0.9, ≥200 days old → 0.1 (floor).
+def _freshness(posting: Posting) -> float:
+    """Step-function freshness: 1.0 (0–14 d) → 0.1 (≥90 d)."""
     date_str = posting.posted_at or posting.last_seen_at or ""
     if not date_str:
         return 0.5
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         days_old = max(0, (datetime.now(UTC) - dt).days)
-        return max(0.1, min(0.9, 0.9 - days_old * 0.004))
+        if days_old < 15:
+            return 1.0
+        if days_old < 30:
+            return 0.8
+        if days_old < 60:
+            return 0.5
+        if days_old < 90:
+            return 0.3
+        return 0.1
     except (ValueError, AttributeError, TypeError):
         return 0.5
+
+
+def _compute_response_likelihood(posting: Posting, company: Company) -> float:
+    """Module 5 response-likelihood model (no LLM — pure signal arithmetic).
+
+    Data-rich path (cohort_applied_count >= _COHORT_MIN_APPS):
+        0.55 * cohort_response_rate + 0.35 * freshness + 0.10 * (1 - ghost_score)
+
+    Cold-start path (< _COHORT_MIN_APPS applications in cohort):
+        0.65 * freshness + 0.35 * (1 - ghost_history_score)
+
+    Result is clamped to [0, 1].
+    """
+    fresh = _freshness(posting)
+    applied = int(getattr(company, "cohort_applied_count", 0) or 0)
+
+    if applied >= _COHORT_MIN_APPS:
+        cohort_rate = float(company.responsiveness_score or 0.0)
+        score = (
+            _RL_COHORT_WEIGHT * cohort_rate
+            + _RL_FRESH_WEIGHT * fresh
+            + _RL_GHOST_WEIGHT * (1.0 - posting.ghost_score)
+        )
+    else:
+        ghost_hist = float(company.ghost_history_score or 0.0)
+        score = (
+            _RL_COLD_FRESH_WEIGHT * fresh
+            + _RL_COLD_GHOST_WEIGHT * (1.0 - ghost_hist)
+        )
+
+    return max(0.0, min(1.0, score))
 
 
 def _build_explanation(
     matched: list[str],
     missing: list[str],
     semantic_sim: float,
+    *,
+    company: Company | None = None,
 ) -> str:
-    """Deterministic templated explanation — no LLM call."""
+    """Deterministic templated explanation — no LLM call.
+
+    When company cohort data shows a low response rate, appends a cohort reason
+    so the ranking demotion is legible to the user.
+    """
     if not matched and not missing:
-        return f"Semantic match ({semantic_sim:.0%}); no specific skill requirements listed."
-    if matched and not missing:
+        base = f"Semantic match ({semantic_sim:.0%}); no specific skill requirements listed."
+    elif matched and not missing:
         top = ", ".join(matched[:3])
-        return f"Strong match on all listed requirements: {top}."
-    if matched:
+        base = f"Strong match on all listed requirements: {top}."
+    elif matched:
         top_m = ", ".join(matched[:2])
         top_x = ", ".join(missing[:2])
-        return f"Strong on {top_m}; consider building {top_x}."
-    top_x = ", ".join(missing[:3])
-    return f"Semantic fit ({semantic_sim:.0%}); key gaps: {top_x}."
+        base = f"Strong on {top_m}; consider building {top_x}."
+    else:
+        top_x = ", ".join(missing[:3])
+        base = f"Semantic fit ({semantic_sim:.0%}); key gaps: {top_x}."
+
+    # Module 5: annotate when cohort data shows a low response rate
+    if company is not None:
+        applied = int(getattr(company, "cohort_applied_count", 0) or 0)
+        if applied >= _COHORT_MIN_APPS:
+            resp_rate = float(company.responsiveness_score or 0.0)
+            if resp_rate < _LOW_RESP_RATE:
+                responded = round(resp_rate * applied)
+                base += (
+                    f" Low reply rate: {responded} of {applied} batchmates heard back."
+                )
+
+    return base
 
 
 async def _llm_explanation_for_detail(
@@ -360,12 +435,12 @@ class MatchingService:
             0.0,
             min(1.0, SEMANTIC_WEIGHT * semantic_sim + SKILL_WEIGHT * skill_ratio),
         )
-        response_likelihood = _response_likelihood_placeholder(posting)
+        response_likelihood = _compute_response_likelihood(posting, company)
         expected_value = max(
             0.0,
             min(1.0, match_score * response_likelihood * (1.0 - posting.ghost_score)),
         )
-        explanation = _build_explanation(matched, missing, semantic_sim)
+        explanation = _build_explanation(matched, missing, semantic_sim, company=company)
         posting_schema = coerce_posting_schema(posting, company)
         return MatchSchema(
             posting_id=posting.id,

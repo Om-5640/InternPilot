@@ -1,4 +1,4 @@
-"""Module 7 — Application Assistant endpoints."""
+"""Module 7 + 8 — Application Assistant + Tracker endpoints."""
 from __future__ import annotations
 
 import uuid
@@ -17,16 +17,21 @@ from app.schemas.application import (
     CreateApplicationResponse,
     DecodeRequest,
     DecodeResponse,
+    DraftFollowupResponse,
     DraftRequest,
     DraftResponse,
     GetApplicationResponse,
     ListApplicationsResponse,
+    RecordOutcomeRequest,
+    RecordOutcomeResponse,
     SendRequest,
     UpdateApplicationRequest,
     UpdateArtifactRequest,
     UpdateArtifactResponse,
+    coerce_outcome_schema,
 )
 from app.services.application_service import ApplicationService
+from app.services.tracker_service import TrackerService
 
 router = APIRouter(tags=["applications"])
 
@@ -41,7 +46,7 @@ _CHANNEL_VALUES = {"portal", "email", "referral"}
 
 
 # ---------------------------------------------------------------------------
-# Utility endpoints (no application record yet)
+# Utility endpoints (no application record yet) — ApplicationService
 # ---------------------------------------------------------------------------
 
 
@@ -83,7 +88,7 @@ async def draft_artifact(
 
 
 # ---------------------------------------------------------------------------
-# Application CRUD
+# Application CRUD — create/send via ApplicationService
 # ---------------------------------------------------------------------------
 
 
@@ -114,6 +119,11 @@ async def send_application(
     return GetApplicationResponse(application=application)
 
 
+# ---------------------------------------------------------------------------
+# Application list/get/update — TrackerService (Module 8)
+# ---------------------------------------------------------------------------
+
+
 @router.get("/applications", response_model=ListApplicationsResponse)
 async def list_applications(
     status: str | None = Query(default=None),
@@ -124,7 +134,7 @@ async def list_applications(
 ) -> ListApplicationsResponse:
     if status is not None and status not in _APP_STATUS_VALUES:
         raise APIError(400, "INVALID_STATUS", f"status must be one of {sorted(_APP_STATUS_VALUES)}")
-    svc = ApplicationService(db, current_user.id)
+    svc = TrackerService(db, current_user.id)
     result = await svc.list_applications(status, page, limit)
     return ListApplicationsResponse(**result)
 
@@ -135,7 +145,7 @@ async def get_application(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GetApplicationResponse:
-    svc = ApplicationService(db, current_user.id)
+    svc = TrackerService(db, current_user.id)
     application = await svc.get_application(application_id)
     return GetApplicationResponse(application=application)
 
@@ -149,9 +159,50 @@ async def update_application(
 ) -> GetApplicationResponse:
     if body.status is not None and body.status not in _APP_STATUS_VALUES:
         raise APIError(400, "INVALID_STATUS", f"status must be one of {sorted(_APP_STATUS_VALUES)}")
-    svc = ApplicationService(db, current_user.id)
+    svc = TrackerService(db, current_user.id)
     application = await svc.update_application(application_id, body.status, body.notes)
     return GetApplicationResponse(application=application)
+
+
+# ---------------------------------------------------------------------------
+# Module 8 additions — follow-up + outcome
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/applications/{application_id}/followup",
+    response_model=DraftFollowupResponse,
+)
+async def draft_followup(
+    application_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DraftFollowupResponse:
+    svc = TrackerService(db, current_user.id)
+    draft = await svc.draft_followup(application_id)
+    return DraftFollowupResponse(draft=draft)
+
+
+@router.post(
+    "/applications/{application_id}/outcome",
+    status_code=201,
+    response_model=RecordOutcomeResponse,
+)
+async def record_outcome(
+    application_id: uuid.UUID,
+    body: RecordOutcomeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RecordOutcomeResponse:
+    svc = TrackerService(db, current_user.id)
+    outcome = await svc.record_outcome(
+        application_id,
+        body.outcome_type,
+        body.responded,
+        body.time_to_response_hours,
+        body.source,
+    )
+    return RecordOutcomeResponse(outcome=coerce_outcome_schema(outcome))
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,12 @@ type OutcomeType =
 type ReferralStatus =
   "suggested" | "requested" | "accepted" | "declined" | "no_response";
 type PredictionType = "match" | "response_likelihood" | "ghost" | "ats";
+type OpportunityType = "company" | "research";
+type CompanyType = "product" | "service" | "research_lab" | "unknown";
+type QuestionCategory =
+  | "coding" | "cs_fundamentals" | "project" | "behavioral" | "hr" | "gd"
+  | "research_fit" | "domain_depth" | "methods";
+type Difficulty = "easy" | "medium" | "hard";
 type NotificationType =
   "new_matches" | "deadline" | "followup_due" | "response_received" | "digest";
 
@@ -54,6 +60,9 @@ interface User {
 interface Profile {
   user_id: string;
   headline?: string;
+  university?: string;          // student's own university (parsed from résumé or user-set)
+  grad_year?: number;           // expected graduation year (int)
+  research_interests: string[]; // empty array by default
   skills: string[];
   experience: { title: string; org: string; start?: string; end?: string; description?: string }[];
   education: { degree: string; institution: string; year?: string; gpa?: number }[];
@@ -157,7 +166,8 @@ interface Contact {            // alumni / referral target
   company_id: string;
   company_name: string;
   role?: string;
-  dau_batch?: string;
+  grad_year?: number;   // graduation year (int); replaces dau_batch
+  university?: string;  // alumnus's university
   linkedin?: string;
   relationship: "alumni" | "second_degree" | "unknown";
 }
@@ -172,14 +182,28 @@ interface Referral {
   created_at: string;
 }
 
+interface PrepQuestion {
+  q: string;
+  type: "technical" | "behavioral" | "gd";
+  category?: QuestionCategory;           // v1.1 — additive
+  difficulty?: Difficulty;               // v1.1 — additive
+  answer_guidance?: string;
+  ideal_answer_outline?: string;         // v1.1 — additive
+}
+
 interface InterviewPrep {
   id: string;
   application_id?: string;
   company_name: string;
   role: string;
-  questions: { q: string; type: "technical" | "behavioral" | "gd"; answer_guidance?: string }[];
+  opportunity_type: OpportunityType;     // v1.1 — default "company"
+  region?: string;                       // v1.1 — additive
+  company_type: CompanyType;             // v1.1 — classified internally
+  questions: PrepQuestion[];
   weak_spots: string[];
+  reverse_questions: string[];           // v1.1 — additive
   created_at: string;
+  updated_at: string;
 }
 
 interface Evaluation {         // prediction-vs-outcome log (mostly internal)
@@ -285,7 +309,7 @@ Format: `METHOD /path` — *auth* — **request** → **response**.
 - ⚙️ `POST /api/integrations/gmail/sync` — worker — `{}` → `200 { detected: number }` *(reply detection → auto-creates outcomes)*
 
 ### Module 9 — Interview-Prep Handoff
-- 🟦 `POST /api/interview-prep` — auth — `{ application_id?, company_name, role }` → `201 { prep: InterviewPrep }`
+- 🟦 `POST /api/interview-prep` — auth — `{ application_id?, company_name, role, opportunity_type?, region? }` → `201 { prep: InterviewPrep }` *(adaptive: company vs research, region-aware round structure)*
 - 🟦 `GET  /api/interview-prep/:id` — auth — → `200 { prep: InterviewPrep }`
 
 ### Module 10 — Evaluation System
@@ -310,4 +334,4 @@ Format: `METHOD /path` — *auth* — **request** → **response**.
 - **Change rule:** any new field or endpoint is added *here first*, then implemented on both sides. The contract is the law — that's what keeps the merge a wiring job, not a debugging job.
 
 ---
-*v1 — covers the full feature set in the master spec. Versioned: bump to v1.1 on any change.*
+*v1.1 — Module 9 Interview Prep: OpportunityType, CompanyType, QuestionCategory, Difficulty, PrepQuestion, InterviewPrep extended with opportunity_type/region/company_type/reverse_questions/updated_at; question items gain category/difficulty/ideal_answer_outline. All new fields are additive/optional — UI-safe.*

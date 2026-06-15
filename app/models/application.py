@@ -12,6 +12,7 @@ from app.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.artifact import Artifact
+    from app.models.outcome import Outcome
 
 
 class Application(Base, TimestampMixin):
@@ -51,4 +52,7 @@ class Application(Base, TimestampMixin):
 
     artifacts: Mapped[list[Artifact]] = relationship(
         "Artifact", back_populates="application", lazy="noload"
+    )
+    outcomes: Mapped[list[Outcome]] = relationship(
+        "Outcome", back_populates="application", lazy="noload"
     )

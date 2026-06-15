@@ -181,13 +181,23 @@ def vague_jd_score(posting: Posting) -> float:
     return max(0.0, min(1.0, raw))
 
 
+MIN_COHORT_APPS: int = 5
+
+
 def company_ghost_score(company: Company) -> float:
     return float(company.ghost_history_score or 0.0)
 
 
-def cohort_score() -> float:
-    # TODO Module 7 — replace with real cohort response rate.
-    return 0.0
+def cohort_response_signal(company: Company) -> float:
+    """Cross-user response signal.
+
+    Returns 0.0 (neutral) when applied count < MIN_COHORT_APPS.
+    Once enough data exists, unresponsive companies raise the ghost score.
+    """
+    applied = getattr(company, "cohort_applied_count", None) or 0
+    if applied < MIN_COHORT_APPS:
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - float(company.responsiveness_score or 1.0)))
 
 
 def compute_ghost_score(
@@ -201,7 +211,7 @@ def compute_ghost_score(
         + REPOST_WEIGHT * repost_score(posting.source_sightings)
         + VAGUE_WEIGHT * vague_jd_score(posting)
         + COMPANY_WEIGHT * company_ghost_score(company)
-        + COHORT_WEIGHT * cohort_score()
+        + COHORT_WEIGHT * cohort_response_signal(company)
     )
     return max(0.0, min(1.0, score))
 
@@ -282,7 +292,11 @@ class GhostService:
             company = company_by_id[company_id]
             avg_ghost = sum(p.ghost_score for p in co_postings) / len(co_postings)
             company.ghost_history_score = avg_ghost
-            company.responsiveness_score = 1.0 - avg_ghost
+            # Only update responsiveness_score from ghost history when there is no
+            # real cohort data yet; CohortService owns it once MIN_COHORT_APPS is met.
+            applied = getattr(company, "cohort_applied_count", None) or 0
+            if applied < MIN_COHORT_APPS:
+                company.responsiveness_score = 1.0 - avg_ghost
             self.db.add(company)
 
         await self.db.commit()

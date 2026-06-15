@@ -46,6 +46,12 @@ class Profile(Base):
     projects: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list, server_default="[]"
     )
+    university: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    university_canonical: Mapped[str | None] = mapped_column(String(500), nullable=True, index=True)
+    grad_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    research_interests: Mapped[list[Any]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     github_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     preferences: Mapped[dict[str, Any]] = mapped_column(
         JSON,

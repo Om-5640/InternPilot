@@ -18,11 +18,12 @@ from app.services.ghost_service import (
     COHORT_WEIGHT,
     COMPANY_WEIGHT,
     GHOST_THRESHOLD,
+    MIN_COHORT_APPS,
     REPOST_WEIGHT,
     VAGUE_WEIGHT,
     GhostService,
     age_score,
-    cohort_score,
+    cohort_response_signal,
     company_ghost_score,
     compute_ghost_score,
     repost_score,
@@ -169,7 +170,7 @@ async def test_formula_exact_weighted_sum(db: AsyncSession) -> None:
     r_s = repost_score(posting.source_sightings)
     v_s = vague_jd_score(posting)
     c_s = company_ghost_score(company)
-    co_s = cohort_score()
+    co_s = cohort_response_signal(company)  # 0.0: cohort_applied_count=0 < MIN_COHORT_APPS
 
     expected = max(
         0.0,
@@ -237,9 +238,11 @@ async def test_company_ghost_history_updates_after_rescore(db: AsyncSession) -> 
 
 
 def test_cohort_signal_defaults_to_zero() -> None:
-    """cohort_score() returns 0.0 until Module 7 wires real data."""
-    assert cohort_score() == 0.0
+    """cohort_response_signal returns 0.0 when applied count < MIN_COHORT_APPS."""
+    company = _make_company()  # cohort_applied_count defaults to 0
+    assert cohort_response_signal(company) == 0.0
     assert COHORT_WEIGHT == 0.10
+    assert MIN_COHORT_APPS == 5
 
 
 # ---------------------------------------------------------------------------
