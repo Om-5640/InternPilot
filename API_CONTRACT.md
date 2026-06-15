@@ -45,7 +45,7 @@ type QuestionCategory =
   | "research_fit" | "domain_depth" | "methods";
 type Difficulty = "easy" | "medium" | "hard";
 type NotificationType =
-  "new_matches" | "deadline" | "followup_due" | "response_received" | "digest";
+  "followup_due" | "status_change" | "new_match" | "response" | "prep_ready";
 
 interface User {
   id: string;
@@ -312,18 +312,88 @@ Format: `METHOD /path` — *auth* — **request** → **response**.
 - 🟦 `POST /api/interview-prep` — auth — `{ application_id?, company_name, role, opportunity_type?, region? }` → `201 { prep: InterviewPrep }` *(adaptive: company vs research, region-aware round structure)*
 - 🟦 `GET  /api/interview-prep/:id` — auth — → `200 { prep: InterviewPrep }`
 
-### Module 10 — Evaluation System
-- 🟦 `GET  /api/evaluation/metrics` — auth — → `200 { platform_iq: number, iq_trend: { date, value }[], metrics: ModelMetric[] }`
-- 🟦 `GET  /api/evaluation/accuracy` — auth — → `200 { ghost_precision: number, response_calibration: number, ats_correlation: number }`
-- 🟦 `GET  /api/evaluation/ab-tests` — auth — → `200 { data: { name: string, variant_a: number, variant_b: number, winner: string }[] }`
-- ⚙️ `POST /api/evaluation/score` — worker — `{}` → `200 { scored: number }` *(compares predictions to outcomes, updates models + metrics)*
+### Module 10 — Evaluation System / Platform IQ
+- 🟦 `GET  /api/evaluation/metrics` — auth — → `200 { latest: Evaluation | null, iq_trend: { date: string, value: number }[] }`
+  - `latest`: most recent `evaluate_now` snapshot (formula_v1 or insufficient_data model_version).
+    Contains response Brier/AUC/accuracy + ghost precision/recall/f1 on the **full** outcome set.
+  - `iq_trend`: the fixed-test-set learning curve from the most recent `/replay` run.
+    Each point: `{ date: ISO-8601, value: number }` where `value = 100 × (1 − Brier_on_fixed_test)`.
+    Tracks response-calibration improvement as the cohort accumulates outcomes.
+    Ghost F1 is **not** included in `value` (ghost shield is rule-based, not trained on outcomes).
+- ⚙️ `POST /api/evaluation/run` — **admin** — `{}` → `202 { latest: Evaluation }`
+  *(scores ALL (application, outcome) pairs against snapshotted predictions; out-of-sample by construction)*
+- ⚙️ `POST /api/evaluation/replay` — **admin** — `{}` → `202 { iq_trend: { date, value }[], points: number }`
+  *(fixed-test-set learning curve: splits 70/30 by time, trains 8 growing prefixes on the 70%, always
+    predicts the SAME held-out 30%; asserts train/test disjoint at every prefix)*
+
+**Evaluation row shape (Evaluation):**
+```
+{
+  id: string;
+  run_at: string;              // ISO-8601
+  n_outcomes: int;             // training-set size (history rows) or total pairs (evaluate_now)
+  response_brier: number;      // Brier score on fixed test (history) or full set (formula_v1)
+  response_auc: number | null; // ROC-AUC; null if single-class
+  response_accuracy: number;
+  ghost_precision: number;
+  ghost_recall: number;
+  ghost_f1: number;
+  platform_iq: number;         // 100×(1−brier) for history rows; full formula for formula_v1 row
+  model_version: string;       // "formula_v1" | "insufficient_data" | "logreg_n{N}"
+  created_at: string;
+}
+```
 
 ### Module 11 — Dashboard & Notifications
-- 🟦 `GET /api/dashboard` — auth — → `200 { summary: DashboardSummary }`
-- 🟦 `GET /api/dashboard/cohort` — admin — → `200 { ghost_map: object, company_responsiveness: object }`
-- 🟦 `GET /api/notifications` — auth — → `200 { data: Notification[] }`
-- 🟦 `PUT /api/notifications/:id/read` — auth — `{}` → `200 { notification: Notification }`
-- 🟦 `GET /api/digest` — auth — → `200 { new_matches: Match[], due_followups: Application[] }`
+- 🟦 `GET  /api/dashboard` — auth — → `200 DashboardSummary`
+- 🟦 `GET  /api/digest` — auth — → `200 DigestResponse`
+- 🟦 `GET  /api/notifications` — auth — → `200 Notification[]` *(newest first; user-scoped)*
+- 🟦 `PUT  /api/notifications/:id/read` — auth — `{}` → `200 Notification` *(404 if not owned by current user)*
+
+**DashboardSummary:**
+```ts
+interface PipelineCounts {
+  saved: number; applied: number; viewed: number; responded: number;
+  interview: number; offer: number; rejected: number;
+  ghosted: number;  // status="applied" + no_response/bounced outcome
+}
+
+interface DashboardSummary {
+  pipeline: PipelineCounts;
+  response_rate: float;        // (responded+interview+offer) / all non-saved; 0.0 if no apps
+  ghosts_avoided: int;         // ghost postings the user has NOT applied to
+  time_saved_hours: float;     // ghosts_avoided×2.0 + cover_letter_drafts×1.5
+  platform_iq: float;          // GLOBAL — same for all users (from latest evaluate_now row)
+  iq_trend: float[];           // GLOBAL — build_history IQ values ordered by run_at
+}
+```
+
+**DigestResponse:**
+```ts
+interface DigestResponse {
+  new_matches: int;       // active non-ghost postings not yet applied to
+  followup_due: int;      // applied ≥ 7 days ago, no positive outcome
+  recent_responses: int;  // positive outcomes (responded/interview/offer) in last 7 days
+  ghosts_avoided: int;    // same formula as DashboardSummary.ghosts_avoided
+  platform_iq: float;     // GLOBAL
+}
+```
+
+**Notification:**
+```ts
+type NotificationType = "followup_due" | "status_change" | "new_match" | "response" | "prep_ready";
+
+interface Notification {
+  id: string;
+  type: NotificationType;
+  content: string;
+  read: boolean;
+  created_at: string;
+}
+```
+
+*generate() is called server-side and is idempotent: (user_id, type, content) uniqueness prevents duplicates.
+platform_iq + iq_trend are GLOBAL aggregates (not user-scoped). All other dashboard fields are user-scoped.*
 
 ---
 

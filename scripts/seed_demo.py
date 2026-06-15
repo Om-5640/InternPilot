@@ -33,9 +33,11 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
+from app.models.application import Application  # noqa: E402
 from app.models.artifact import Artifact  # noqa: E402
 from app.models.company import Company  # noqa: E402
 from app.models.contact import Contact, RelationshipType  # noqa: E402
+from app.models.outcome import Outcome  # noqa: E402
 from app.models.posting import Posting  # noqa: E402
 from app.models.user import AuthProvider, User, UserRole  # noqa: E402
 from app.schemas.profile import (  # noqa: E402
@@ -90,6 +92,9 @@ COMPANY_DEFS: list[dict[str, Any]] = [
     {"name": "PipelineTech",  "domain": "pipelinetech.io",  "industry": "SaaS",    "size": "11-50",   "archetype": _GHOST},
     {"name": "TalentPool Inc","domain": "talentpool.co",    "industry": "HR Tech", "size": "51-200",  "archetype": _GHOST},
     {"name": "InnovateCo",    "domain": "innovateco.tech",  "industry": "AdTech",  "size": "11-50",   "archetype": _GHOST},
+    # ── additional responsive / mixed ────────────────────────────────────────
+    {"name": "Snowflake",     "domain": "snowflake.com",    "industry": "Cloud Data","size": "5001-10000", "archetype": _RESPONSIVE},
+    {"name": "Databricks",    "domain": "databricks.com",   "industry": "Data / AI","size": "1001-5000",  "archetype": _MIXED},
 ]
 
 # ---------------------------------------------------------------------------
@@ -357,10 +362,57 @@ POSTING_TEMPLATES: dict[str, list[dict[str, Any]]] = {
             "location": "Remote", "work_mode": "remote", "stipend": None,
         },
     ],
+    "Snowflake": [
+        {
+            "title": "Data Engineering Intern – Cloud Platform",
+            "description": (
+                "Join Snowflake's Cloud Platform team to build the pipelines and tooling that "
+                "power data warehousing for thousands of enterprises. Work in Python and SQL "
+                "to design scalable data models, optimize query performance, and build internal "
+                "developer tools backed by Snowflake's native cloud architecture."
+            ),
+            "requirements": ["Python", "SQL", "Data Engineering", "Cloud Computing", "dbt", "Airflow"],
+            "location": "San Mateo, CA", "work_mode": "hybrid", "stipend": 9000,
+        },
+        {
+            "title": "Software Engineer Intern – Query Optimization",
+            "description": (
+                "Work on the query compiler and optimizer at the heart of Snowflake's execution "
+                "engine. Contribute to performance improvements in C++ and Python, write unit "
+                "and integration tests, and collaborate with senior engineers to push the limits "
+                "of cloud-based analytical performance."
+            ),
+            "requirements": ["Python", "C++", "Algorithms", "Data Structures", "Databases", "SQL"],
+            "location": "San Mateo, CA", "work_mode": "hybrid", "stipend": 9200,
+        },
+    ],
+    "Databricks": [
+        {
+            "title": "ML Platform Engineer Intern",
+            "description": (
+                "Help build the MLflow and Lakehouse AI infrastructure used by data teams "
+                "worldwide. Work in Python and Scala to improve experiment tracking, model "
+                "registry, and deployment tooling. Collaborate with product and ML teams "
+                "to ship features that reduce friction in the ML lifecycle."
+            ),
+            "requirements": ["Python", "Machine Learning", "MLflow", "Spark", "SQL", "Docker"],
+            "location": "San Francisco, CA", "work_mode": "hybrid", "stipend": 8800,
+        },
+        {
+            "title": "Data Science Intern – Platform Analytics",
+            "description": (
+                "Use Python and SQL to analyse usage patterns across the Databricks platform, "
+                "run A/B experiments to improve onboarding, and build dashboards that guide "
+                "product decisions. Partner closely with product and growth teams."
+            ),
+            "requirements": ["Python", "SQL", "Statistics", "A/B Testing", "pandas", "Spark"],
+            "location": "San Francisco, CA", "work_mode": "hybrid", "stipend": 8400,
+        },
+    ],
 }
 
 # ---------------------------------------------------------------------------
-# Demo users (5 varied personas)
+# Demo users (14 varied personas — expanded for stable evaluation curve)
 # ---------------------------------------------------------------------------
 
 DEMO_USERS: list[dict[str, Any]] = [
@@ -429,6 +481,124 @@ DEMO_USERS: list[dict[str, Any]] = [
         "projects": [{"name": "CloudNotes", "description": "Serverless note-taking app with React frontend and FastAPI backend on AWS Lambda + DynamoDB.", "tech": ["Python", "React", "FastAPI", "AWS", "TypeScript", "Docker"]}],
         "education": [{"degree": "BS Computer Science", "institution": "University of Melbourne", "year": 2026}],
     },
+    # ── expanded personas ────────────────────────────────────────────────────
+    {
+        "name": "Morgan Lee (Demo)",
+        "email": "morgan.mobile" + DEMO_EMAIL_SUFFIX,
+        "persona": "Mobile / iOS",
+        "university": "Carnegie Mellon",
+        "grad_year": 2026,
+        "research_interests": [],
+        "headline": "iOS Developer | Swift · SwiftUI · Xcode",
+        "skills": ["Swift", "SwiftUI", "Xcode", "Objective-C", "REST APIs", "Firebase", "Git", "Python", "SQL", "iOS"],
+        "experience": [{"title": "iOS Engineering Intern", "org": "Duolingo", "start": "2024-06", "end": "2024-09", "description": "Shipped SwiftUI features in Duolingo iOS app; improved A/B test framework for 50M+ users."}],
+        "projects": [{"name": "FocusKit", "description": "iOS productivity app with SwiftUI and Core Data; 2k App Store downloads in first month.", "tech": ["Swift", "SwiftUI", "Core Data", "Firebase"]}],
+        "education": [{"degree": "BS Computer Science", "institution": "Carnegie Mellon", "year": 2026}],
+    },
+    {
+        "name": "Aisha Kumar (Demo)",
+        "email": "aisha.security" + DEMO_EMAIL_SUFFIX,
+        "persona": "Cybersecurity",
+        "university": "Georgia Tech",
+        "grad_year": 2026,
+        "research_interests": ["network security", "cryptography"],
+        "headline": "Security Engineer | Python · Rust · Network Security",
+        "skills": ["Python", "Rust", "Linux", "Network Security", "Cryptography", "AWS", "Docker", "Kubernetes", "SQL", "Bash"],
+        "experience": [{"title": "Security Engineering Intern", "org": "Palo Alto Networks", "start": "2024-06", "end": "2024-09", "description": "Built threat-detection pipelines in Python; improved SIEM alert precision by 40% on cloud infrastructure."}],
+        "projects": [{"name": "VaultScan", "description": "Open-source static analysis tool for detecting secrets in Git repositories, written in Rust.", "tech": ["Rust", "Python", "Linux", "Git"]}],
+        "education": [{"degree": "BS Cybersecurity", "institution": "Georgia Tech", "year": 2026}],
+    },
+    {
+        "name": "Theo Rodriguez (Demo)",
+        "email": "theo.devops" + DEMO_EMAIL_SUFFIX,
+        "persona": "Platform / DevOps",
+        "university": "University of Waterloo",
+        "grad_year": 2025,
+        "research_interests": [],
+        "headline": "Platform Engineer | Terraform · Kubernetes · AWS",
+        "skills": ["Python", "Terraform", "Kubernetes", "AWS", "Docker", "Bash", "PostgreSQL", "Prometheus", "Grafana", "Linux"],
+        "experience": [{"title": "Platform Engineering Intern", "org": "Shopify", "start": "2024-05", "end": "2024-09", "description": "Automated GKE cluster provisioning with Terraform; reduced deploy time 60% using Argo CD and GitHub Actions."}],
+        "projects": [{"name": "AutoScale", "description": "Kubernetes autoscaler plugin that reduces cloud cost by 35% using predictive scheduling.", "tech": ["Python", "Kubernetes", "Terraform", "Prometheus", "AWS"]}],
+        "education": [{"degree": "BASc Systems Design Engineering", "institution": "University of Waterloo", "year": 2025}],
+    },
+    {
+        "name": "Priya Sharma (Demo)",
+        "email": "priya.nlp" + DEMO_EMAIL_SUFFIX,
+        "persona": "NLP / AI Research",
+        "university": "IIT Delhi",
+        "grad_year": 2026,
+        "research_interests": ["natural language processing", "multilingual models", "low-resource NLP"],
+        "headline": "NLP Researcher | PyTorch · Transformers · Multilingual AI",
+        "skills": ["Python", "PyTorch", "Transformers", "Hugging Face", "scikit-learn", "SQL", "NLP", "Machine Learning", "CUDA", "Research"],
+        "experience": [{"title": "NLP Research Intern", "org": "IIIT Hyderabad", "start": "2024-01", "end": "2024-12", "description": "Fine-tuned mBART for low-resource Dravidian language translation; published results at ACL workshop."}],
+        "projects": [{"name": "MultiLingualQA", "description": "Cross-lingual question-answering system using adapter-tuned mBERT across 12 languages.", "tech": ["Python", "PyTorch", "Hugging Face", "Transformers", "SQL"]}],
+        "education": [{"degree": "BTech Computer Science", "institution": "IIT Delhi", "year": 2026}],
+    },
+    {
+        "name": "Chris Walsh (Demo)",
+        "email": "chris.quant" + DEMO_EMAIL_SUFFIX,
+        "persona": "Quantitative Finance",
+        "university": "University of Chicago",
+        "grad_year": 2026,
+        "research_interests": ["financial mathematics", "stochastic processes"],
+        "headline": "Quant Developer | Python · C++ · Statistical Modelling",
+        "skills": ["Python", "C++", "SQL", "Statistics", "pandas", "numpy", "R", "Machine Learning", "Financial Modelling", "MATLAB"],
+        "experience": [{"title": "Quantitative Research Intern", "org": "Two Sigma", "start": "2024-06", "end": "2024-09", "description": "Built alpha factor backtesting framework in Python+C++; identified signals generating 12% annual Sharpe."}],
+        "projects": [{"name": "FactorLab", "description": "Open-source quantitative factor research platform in Python with pandas-based backtesting engine.", "tech": ["Python", "pandas", "SQL", "Statistics", "R"]}],
+        "education": [{"degree": "BS Statistics + Computer Science", "institution": "University of Chicago", "year": 2026}],
+    },
+    {
+        "name": "Maya Johnson (Demo)",
+        "email": "maya.frontend" + DEMO_EMAIL_SUFFIX,
+        "persona": "Frontend / Design Engineering",
+        "university": "Rhode Island School of Design",
+        "grad_year": 2026,
+        "research_interests": [],
+        "headline": "Design Engineer | React · TypeScript · Figma",
+        "skills": ["TypeScript", "React", "CSS", "HTML", "Figma", "JavaScript", "Node.js", "GraphQL", "REST APIs", "WebGL"],
+        "experience": [{"title": "Frontend Engineering Intern", "org": "Vercel", "start": "2024-06", "end": "2024-09", "description": "Built Next.js component library adopted by 200+ teams; improved Lighthouse score from 68 to 97 across key pages."}],
+        "projects": [{"name": "MotionUI", "description": "Accessible React animation library with Framer Motion; 3k GitHub stars in first quarter.", "tech": ["TypeScript", "React", "CSS", "Figma", "JavaScript"]}],
+        "education": [{"degree": "BFA Digital Media / CS", "institution": "Rhode Island School of Design", "year": 2026}],
+    },
+    {
+        "name": "Ben Nakamura (Demo)",
+        "email": "ben.embedded" + DEMO_EMAIL_SUFFIX,
+        "persona": "Embedded / Systems",
+        "university": "University of Michigan",
+        "grad_year": 2025,
+        "research_interests": ["real-time systems", "computer architecture"],
+        "headline": "Systems Engineer | C · Rust · RTOS",
+        "skills": ["C", "Rust", "Python", "Linux", "RTOS", "Embedded Systems", "Algorithms", "Data Structures", "Git", "Bash"],
+        "experience": [{"title": "Embedded Systems Intern", "org": "Tesla", "start": "2024-05", "end": "2024-09", "description": "Developed C firmware for BMS power-management controller; reduced boot latency 25% on FreeRTOS target."}],
+        "projects": [{"name": "TinyOS", "description": "Minimal RTOS kernel in Rust for ARM Cortex-M4 with preemptive scheduling and memory isolation.", "tech": ["Rust", "C", "Linux", "RTOS", "Algorithms"]}],
+        "education": [{"degree": "BSE Computer Engineering", "institution": "University of Michigan", "year": 2025}],
+    },
+    {
+        "name": "Zara Ahmed (Demo)",
+        "email": "zara.product" + DEMO_EMAIL_SUFFIX,
+        "persona": "Product Analytics",
+        "university": "London School of Economics",
+        "grad_year": 2026,
+        "research_interests": ["behavioral economics", "experimentation"],
+        "headline": "Product Analyst | SQL · Python · Looker",
+        "skills": ["SQL", "Python", "pandas", "Looker", "Tableau", "Statistics", "A/B Testing", "R", "dbt", "Excel"],
+        "experience": [{"title": "Product Analytics Intern", "org": "Spotify", "start": "2024-06", "end": "2024-09", "description": "Analysed podcast discovery funnel; identified A/B test winners that increased week-2 retention by 8%."}],
+        "projects": [{"name": "RetentionLens", "description": "SQL + Python toolkit for cohort retention analysis with automated Looker dashboard generation.", "tech": ["Python", "SQL", "pandas", "Tableau", "Statistics"]}],
+        "education": [{"degree": "BSc Economics + Data Science", "institution": "London School of Economics", "year": 2026}],
+    },
+    {
+        "name": "Leon Fischer (Demo)",
+        "email": "leon.infra" + DEMO_EMAIL_SUFFIX,
+        "persona": "Infrastructure / Cloud",
+        "university": "ETH Zurich",
+        "grad_year": 2026,
+        "research_interests": [],
+        "headline": "Infrastructure Engineer | Go · gRPC · GCP",
+        "skills": ["Go", "Python", "gRPC", "GCP", "Kubernetes", "Terraform", "PostgreSQL", "Redis", "Docker", "Linux"],
+        "experience": [{"title": "Site Reliability Engineering Intern", "org": "Google", "start": "2024-03", "end": "2024-09", "description": "Improved GKE autoscaling pipeline in Go; reduced P99 scheduling latency from 4.2s to 0.9s."}],
+        "projects": [{"name": "PulseCheck", "description": "Distributed health-check and alerting system in Go+gRPC deployed on GKE with Terraform.", "tech": ["Go", "gRPC", "GCP", "Kubernetes", "Terraform", "Redis"]}],
+        "education": [{"degree": "MSc Computer Science", "institution": "ETH Zurich", "year": 2026}],
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -472,23 +642,22 @@ ALUMNI_CONTACTS: dict[str, list[dict[str, Any]]] = {
     "PipelineTech":   [],
     "TalentPool Inc": [],
     "InnovateCo":     [],
+    "Snowflake": [
+        {"name": "Yuki Tanaka",    "role": "Data Engineer",          "grad_year": 2023, "university": "UC Berkeley",             "relationship": "alumni"},
+        {"name": "Carlos Reyes",   "role": "Software Engineer",       "grad_year": 2024, "university": "Carnegie Mellon",         "relationship": "alumni"},
+    ],
+    "Databricks": [
+        {"name": "Fatima Al-Amin", "role": "ML Engineer",             "grad_year": 2023, "university": "MIT",                     "relationship": "second_degree"},
+        {"name": "Lucas Bauer",    "role": "Platform Engineer",        "grad_year": 2024, "university": "ETH Zurich",              "relationship": "alumni"},
+    ],
 }
 
 
 # ---------------------------------------------------------------------------
-# Application assignment: 12 apps per user
-# Base: 1 app to each of 10 companies (all 4 responsive + 3 mixed + 3 ghost)
-# Extras: 2 more per user from the second posting of rotating companies,
-# ensuring some companies cross MIN_COHORT_APPS=5 with room to spare.
+# Application assignment: every user applies to every posting.
+# 12 companies × ~2.2 postings avg = 28 postings × 14 users = 392 apps total.
+# This gives the evaluation curve enough data to show smooth learning.
 # ---------------------------------------------------------------------------
-
-_EXTRAS: list[list[tuple[str, int]]] = [
-    [("Google", 1), ("Stripe", 1)],
-    [("Figma", 1), ("Microsoft", 1)],
-    [("Notion", 1), ("Amazon", 1)],
-    [("Lyft", 1), ("PipelineTech", 1)],
-    [("TalentPool Inc", 1), ("InnovateCo", 1)],
-]
 
 # Titles of deceptive postings used in summary callout
 DECEPTIVE_TITLES: frozenset[str] = frozenset({
@@ -497,15 +666,13 @@ DECEPTIVE_TITLES: frozenset[str] = frozenset({
 })
 
 
-def _assignment(user_idx: int) -> list[tuple[str, int]]:
-    base: list[tuple[str, int]] = [
-        ("Google", 0), ("Stripe", 0), ("Figma", 0), ("Notion", 0),
-        ("Microsoft", 0), ("Amazon", 0), ("Lyft", 0),
-        ("PipelineTech", 0), ("TalentPool Inc", 0), ("InnovateCo", 0),
-        # deceptive postings — look clean but company never responds
-        ("PipelineTech", 2), ("TalentPool Inc", 2),
-    ]
-    return base + _EXTRAS[user_idx % len(_EXTRAS)]
+def _assignment() -> list[tuple[str, int]]:
+    """Return ALL (company_name, posting_index) pairs — every posting, every company."""
+    result: list[tuple[str, int]] = []
+    for cname, templates in POSTING_TEMPLATES.items():
+        for i in range(len(templates)):
+            result.append((cname, i))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +882,7 @@ async def main() -> None:
         print("\nSeeding users, profiles, applications, outcomes...")
         n_users = n_apps = n_outcomes = 0
 
-        for u_idx, udef in enumerate(DEMO_USERS):
+        for _u_idx, udef in enumerate(DEMO_USERS):
             # skip if user already exists
             existing_u = (await db.execute(select(User).where(User.email == udef["email"]))).scalar_one_or_none()
             if existing_u is not None:
@@ -750,7 +917,8 @@ async def main() -> None:
             app_svc = ApplicationService(db, user.id)
             tracker_svc = TrackerService(db, user.id)
 
-            for cname, p_idx in _assignment(u_idx):
+            assignment = _assignment()
+            for cname, p_idx in assignment:
                 posting = posting_map[(cname, p_idx)]
                 co = company_map[cname]
                 arch = next(cd["archetype"] for cd in COMPANY_DEFS if cd["name"] == cname)
@@ -784,15 +952,39 @@ async def main() -> None:
                 )
                 n_outcomes += 1
 
-            print(f"  + {udef['name']}: {len(_assignment(u_idx))} apps + outcomes")
+            print(f"  + {udef['name']}: {len(assignment)} apps + outcomes")
 
-        # ── 6. final ghost rescore (with cohort signal) ─────────────────────
+        # ── 6. spread outcome timestamps over 90 days (stable temporal ordering) ──
+        # Sorting by Outcome.id (UUID) gives a deterministic but well-mixed ordering
+        # so that responsive / ghost company outcomes are distributed throughout the
+        # 90-day window — exactly what the evaluation learning curve needs.
+        print("\nSpreading outcome timestamps over 90 days...")
+        all_outcomes = (
+            await db.execute(
+                select(Outcome)
+                .join(Application, Application.id == Outcome.application_id)
+                .join(User, User.id == Application.user_id)
+                .where(User.email.like(f"%{DEMO_EMAIL_SUFFIX}"))
+                .order_by(Outcome.id.asc())
+            )
+        ).scalars().all()
+        base_dt = NOW - timedelta(days=90)
+        n_spread = len(all_outcomes)
+        for i, outcome in enumerate(all_outcomes):
+            outcome.recorded_at = base_dt + timedelta(
+                seconds=int(90 * 24 * 3600 * i / n_spread) if n_spread > 1 else 0
+            )
+            db.add(outcome)
+        await db.commit()
+        print(f"  Spread {n_spread} outcomes over 90 days (first={base_dt.date()}, last={all_outcomes[-1].recorded_at.date() if all_outcomes else 'n/a'})")
+
+        # ── 7. final ghost rescore (with cohort signal) ─────────────────────
         print("\nRunning final ghost rescore (with cohort signal)...")
         await ghost_svc.rescore_all()
         total_a, flagged_a, snap_after = await _ghost_snapshot(db)
         print(f"  AFTER  cohort signal: {flagged_a}/{total_a} postings flagged")
 
-        # ── 7. collect company response stats ───────────────────────────────
+        # ── 8. collect company response stats ───────────────────────────────
         company_stats: list[dict[str, Any]] = []
         for cdef in COMPANY_DEFS:
             co = company_map[cdef["name"]]
@@ -807,7 +999,7 @@ async def main() -> None:
 
     await engine.dispose()
 
-    # ── 8. print summary ─────────────────────────────────────────────────────
+    # ── 9. print summary ─────────────────────────────────────────────────────
     width = 62
     print("\n" + "=" * width)
     print("DEMO SEED SUMMARY")
