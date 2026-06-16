@@ -18,6 +18,30 @@ import {
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? "/api";
 const USE_MOCKS = ((import.meta as any).env?.VITE_USE_MOCKS ?? "true") !== "false";
 
+// ---------------------------------------------------------------------------
+// Guest mode — browse-only with mock data; cleared on real login/signup
+// ---------------------------------------------------------------------------
+
+const GUEST_KEY = "internpilot_guest";
+
+export function isGuestMode(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  return localStorage.getItem(GUEST_KEY) === "true";
+}
+
+export function setGuestMode(value: boolean): void {
+  if (typeof localStorage === "undefined") return;
+  if (value) {
+    localStorage.setItem(GUEST_KEY, "true");
+  } else {
+    localStorage.removeItem(GUEST_KEY);
+  }
+}
+
+function shouldUseMocks(): boolean {
+  return USE_MOCKS || isGuestMode();
+}
+
 const delay = (ms = 180) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
@@ -53,7 +77,11 @@ class ApiError extends Error {
   }
 }
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+async function http<T>(
+  path: string,
+  init?: RequestInit,
+  opts: { skipAuthRedirect?: boolean } = {},
+): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -61,37 +89,45 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     ...(init?.headers as Record<string, string> | undefined),
   };
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
+  const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
 
-  // 401 → clear token and redirect to /auth
-  if (res.status === 401) {
-    clearToken();
-    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/auth")) {
-      window.location.href = "/auth";
-    }
-    throw new ApiError(401, "UNAUTHORIZED", "Session expired. Please sign in again.");
-  }
-
-  if (!res.ok) {
-    // Try to parse backend error shape: {error: {code, message}}
+  // Parse error body helper
+  const parseErrBody = async (): Promise<{ code: string; message: string }> => {
     let code = "UNKNOWN_ERROR";
     let message = `${res.status} ${res.statusText}`;
     try {
       const body = await res.clone().json();
       if (body?.error?.code) code = body.error.code;
       if (body?.error?.message) message = body.error.message;
-    } catch {
-      // ignore JSON parse failure
+    } catch { /* ignore */ }
+    return { code, message };
+  };
+
+  if (res.status === 401) {
+    const { code, message } = await parseErrBody();
+    if (!opts.skipAuthRedirect) {
+      // Only redirect when the user HAD a valid token (session truly expired).
+      // If there was no token they were simply unauthenticated — don't redirect.
+      if (token) {
+        clearToken();
+        if (typeof window !== "undefined" && !window.location.pathname.startsWith("/auth")) {
+          window.location.href = "/auth";
+        }
+        throw new ApiError(401, code, "Session expired. Please sign in again.");
+      }
+      // No token: unauthenticated request — throw silently (no redirect)
+      throw new ApiError(401, code, message);
     }
+    // Auth endpoints: pass the backend's own message through unchanged
+    throw new ApiError(401, code, message);
+  }
+
+  if (!res.ok) {
+    const { code, message } = await parseErrBody();
     throw new ApiError(res.status, code, message);
   }
 
-  // 204 No Content
   if (res.status === 204) return undefined as unknown as T;
-
   return res.json();
 }
 
@@ -106,20 +142,24 @@ export interface AuthPayload {
 }
 
 export async function authSignup(name: string, email: string, password: string): Promise<AuthPayload> {
-  const data = await http<AuthPayload>("/auth/signup", {
-    method: "POST",
-    body: JSON.stringify({ name, email, password }),
-  });
+  const data = await http<AuthPayload>(
+    "/auth/signup",
+    { method: "POST", body: JSON.stringify({ name, email, password }) },
+    { skipAuthRedirect: true },
+  );
   setToken(data.token);
+  setGuestMode(false);
   return data;
 }
 
 export async function authLogin(email: string, password: string): Promise<AuthPayload> {
-  const data = await http<AuthPayload>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-  });
+  const data = await http<AuthPayload>(
+    "/auth/login",
+    { method: "POST", body: JSON.stringify({ email, password }) },
+    { skipAuthRedirect: true },
+  );
   setToken(data.token);
+  setGuestMode(false);
   return data;
 }
 
@@ -160,6 +200,7 @@ function mapUser(raw: any): User {
 // Backend GET /profile → { profile: ProfileSchema }
 function mapProfile(raw: any): Profile {
   const p = raw?.profile ?? raw;
+  const prefs = p.preferences ?? {};
   return {
     user_id: String(p.user_id),
     headline: p.headline ?? "",
@@ -171,9 +212,13 @@ function mapProfile(raw: any): Profile {
     education: p.education ?? [],
     projects: p.projects ?? [],
     github_url: p.github_url ?? "",
-    preferences: p.preferences ?? {
-      domains: [], work_mode: "any", stipend_min: 0,
-      duration_months: 3, locations: [], target_companies: [],
+    preferences: {
+      domains: prefs.domains ?? [],
+      work_mode: prefs.work_mode ?? "any",
+      stipend_min: prefs.stipend_min ?? 0,
+      duration_months: prefs.duration_months ?? 3,
+      locations: prefs.locations ?? [],
+      target_companies: prefs.target_companies ?? [],
     },
     profile_strength: p.profile_strength ?? 0,
     gaps: p.gaps ?? [],
@@ -396,7 +441,7 @@ function mapResearchOutreach(raw: any): ResearchOutreach {
 export const api = {
   // ---------- Auth ----------
   async me(): Promise<User> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/auth/me");
       return mapUser(raw);
     }
@@ -405,14 +450,14 @@ export const api = {
 
   // ---------- Profile ----------
   async getProfile(): Promise<Profile> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/profile");
       return mapProfile(raw);
     }
     await delay(); return profile;
   },
   async updateProfile(updates: Partial<Profile>): Promise<Profile> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/profile", {
         method: "PUT", body: JSON.stringify(updates),
       });
@@ -421,13 +466,13 @@ export const api = {
     await delay(); return { ...profile, ...updates };
   },
   async getStrength(): Promise<{ profile_strength: number; gaps: string[] }> {
-    if (!USE_MOCKS) return http("/profile/strength");
+    if (!shouldUseMocks()) return http("/profile/strength");
     await delay(); return { profile_strength: profile.profile_strength, gaps: profile.gaps };
   },
 
   // ---------- Postings ----------
   async getPostings(): Promise<Posting[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/postings");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapPosting);
@@ -435,7 +480,7 @@ export const api = {
     await delay(); return postings;
   },
   async getPosting(id: string): Promise<Posting | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/postings/${id}`);
       const p = raw?.posting ?? raw;
       return mapPosting(p);
@@ -445,7 +490,7 @@ export const api = {
 
   // ---------- Matches ----------
   async getMatches(): Promise<Match[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/matches");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapMatch);
@@ -453,7 +498,7 @@ export const api = {
     await delay(); return matches;
   },
   async getMatch(posting_id: string): Promise<Match | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/matches/${posting_id}`);
       const m = raw?.match ?? raw;
       return mapMatch(m);
@@ -463,7 +508,7 @@ export const api = {
 
   // ---------- Applications ----------
   async getApplications(): Promise<Application[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/applications");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapApplication);
@@ -471,7 +516,7 @@ export const api = {
     await delay(); return _applications;
   },
   async setApplicationStatus(id: string, status: ApplicationStatus): Promise<Application | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/applications/${id}`, {
         method: "PUT", body: JSON.stringify({ status }),
       });
@@ -484,7 +529,7 @@ export const api = {
     return _applications.find((a) => a.id === id);
   },
   async getArtifact(id: string): Promise<Artifact | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/artifacts/${id}`);
       const a = raw?.artifact ?? raw;
       return {
@@ -510,7 +555,7 @@ export const api = {
 
   // ---------- Referrals ----------
   async getReferralCandidates(posting_id?: string): Promise<Contact[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const qs = posting_id ? `?posting_id=${posting_id}` : "";
       const raw = await http<any>(`/referrals/candidates${qs}`);
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
@@ -519,7 +564,7 @@ export const api = {
     await delay(); return contacts;
   },
   async getReferrals(): Promise<Referral[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/referrals");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapReferral);
@@ -527,7 +572,7 @@ export const api = {
     await delay(); return _referrals;
   },
   async setReferralStatus(id: string, status: Referral["status"]): Promise<Referral | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/referrals/${id}`, {
         method: "PUT", body: JSON.stringify({ status }),
       });
@@ -540,7 +585,7 @@ export const api = {
 
   // ---------- Interview prep ----------
   async getInterviewPrep(id: string): Promise<InterviewPrep | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/interview-prep/${id}`);
       return raw?.prep ?? raw;
     }
@@ -549,7 +594,7 @@ export const api = {
   },
   // Returns the most recent interview prep for the user, or a mock if none exist
   async getDefaultInterviewPrep(): Promise<InterviewPrep> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       // There's no list endpoint for interview preps, so fall back to mock shape
       // if no prep ID is known. In practice, the prep page should be reached
       // via a link that includes a real prep ID.
@@ -560,24 +605,24 @@ export const api = {
 
   // ---------- Dashboard ----------
   async getDashboard(): Promise<DashboardSummary> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/dashboard");
       return mapDashboard(raw);
     }
     await delay(); return dashboardSummary;
   },
   async getNotifications(): Promise<Notification[]> {
-    if (!USE_MOCKS) return http<Notification[]>("/notifications");
+    if (!shouldUseMocks()) return http<Notification[]>("/notifications");
     await delay(); return _notifications;
   },
   async markNotificationRead(id: string): Promise<void> {
-    if (!USE_MOCKS) { await http(`/notifications/${id}/read`, { method: "PUT" }); return; }
+    if (!shouldUseMocks()) { await http(`/notifications/${id}/read`, { method: "PUT" }); return; }
     _notifications = _notifications.map((n) => n.id === id ? { ...n, read: true } : n);
   },
 
   // ---------- Research ----------
   async getResearchOpportunities(): Promise<ResearchOpportunity[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/research/opportunities");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapResearchOpportunity);
@@ -585,14 +630,14 @@ export const api = {
     await delay(); return researchOpportunities;
   },
   async getResearchOpportunity(id: string): Promise<ResearchOpportunity | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/research/opportunities/${id}`);
       return mapResearchOpportunity(raw);
     }
     await delay(); return researchOpportunities.find((o) => o.id === id);
   },
   async draftResearchPitch(opportunity_id: string): Promise<ResearchPitch> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/research/pitch", {
         method: "POST", body: JSON.stringify({ opportunity_id }),
       });
@@ -621,7 +666,7 @@ maya@berkeley.edu · github.com/maya`,
     };
   },
   async getResearchOutreach(): Promise<ResearchOutreach[]> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/research/outreach");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapResearchOutreach);
@@ -629,7 +674,7 @@ maya@berkeley.edu · github.com/maya`,
     await delay(); return _outreach;
   },
   async saveResearchOutreach(opportunity_id: string, pitch_artifact_id: string | null): Promise<ResearchOutreach> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>("/research/outreach", {
         method: "POST",
         body: JSON.stringify({
@@ -662,7 +707,7 @@ maya@berkeley.edu · github.com/maya`,
     return created;
   },
   async setResearchOutreachStatus(id: string, status: ResearchOutreachStatus): Promise<ResearchOutreach | undefined> {
-    if (!USE_MOCKS) {
+    if (!shouldUseMocks()) {
       const raw = await http<any>(`/research/outreach/${id}`, {
         method: "PUT", body: JSON.stringify({ status }),
       });

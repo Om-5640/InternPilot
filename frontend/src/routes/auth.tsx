@@ -1,8 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LiveBackground } from "@/components/live-background";
-import { Compass, ArrowRight } from "lucide-react";
+import { Compass, ArrowRight, UserRound } from "lucide-react";
 import { useState } from "react";
-import { authLogin, authSignup } from "@/lib/api-client";
+import { authLogin, authSignup, setGuestMode } from "@/lib/api-client";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Sign in — InternPilot" }, { name: "description", content: "Sign in to InternPilot." }] }),
@@ -42,10 +42,16 @@ function Auth() {
       }
       navigate({ to: "/onboarding" });
     } catch (err: any) {
-      setError(err?.message ?? "Sign-in failed. Please try again.");
+      // err.message now comes directly from the backend (e.g. "Incorrect email or password")
+      setError(err?.message ?? "Something went wrong. Please try again.");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const continueAsGuest = () => {
+    setGuestMode(true);
+    navigate({ to: "/feed" });
   };
 
   return (
@@ -139,6 +145,21 @@ function Auth() {
               {submitting ? (mode === "signup" ? "Creating account…" : "Signing in…") : "Continue"} <ArrowRight className="h-4 w-4" />
             </button>
           </form>
+
+          <div className="mt-4 relative">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t" style={{ borderColor: "var(--color-hairline)" }} /></div>
+            <div className="relative flex justify-center"><span className="bg-white px-3 text-xs text-muted-foreground">or</span></div>
+          </div>
+
+          <button
+            type="button"
+            onClick={continueAsGuest}
+            className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-full border px-5 py-3 text-sm font-medium text-foreground hover:bg-secondary transition"
+            style={{ borderColor: "var(--color-hairline)" }}
+          >
+            <UserRound className="h-4 w-4 text-muted-foreground" />
+            Continue as guest
+          </button>
 
           <p className="mt-8 text-xs text-muted-foreground">
             By continuing you agree to our terms. We never spray your applications.

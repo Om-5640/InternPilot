@@ -5,7 +5,7 @@ import { LiveBackground } from "@/components/live-background";
 import { Nav, Footer } from "@/components/nav";
 import { AnimatedCounter, Reveal } from "@/components/motion-primitives";
 import { SectionLabel, Pill, MatchRing, GhostBadge } from "@/components/ui-bits";
-import { api, useApi } from "@/lib/api-client";
+import { api, useApi, getToken, isGuestMode } from "@/lib/api-client";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -90,7 +90,14 @@ function Hero() {
 }
 
 function FloatingMatchCard() {
-  const { data } = useApi(() => api.getMatches(), []);
+  // Only call the real API when authenticated or in guest/mock mode.
+  // Without a token the backend returns 401 and the old code would hard-redirect to /auth.
+  const authenticated =
+    typeof localStorage !== "undefined" ? !!getToken() || isGuestMode() : false;
+  const { data } = useApi(
+    () => (authenticated ? api.getMatches() : Promise.resolve([])),
+    [authenticated],
+  );
   const m = data?.[0];
   const ghost = data?.find((x) => x.is_ghost);
   if (!m) return null;
