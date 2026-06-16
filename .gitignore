@@ -29,6 +29,12 @@ coverage.xml
 # Temp debug scripts (prefixed with _)
 _*.py
 
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
 # OS
 .DS_Store
 Thumbs.db
