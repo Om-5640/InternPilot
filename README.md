@@ -2,12 +2,19 @@
 
 **Stop applying into the void.**
 
-[![Tests](https://img.shields.io/badge/tests-316%2F316%20passing-brightgreen)](#running-the-test-suite)
-[![mypy](https://img.shields.io/badge/mypy-strict-3178c6)](#tech-stack)
-[![ruff](https://img.shields.io/badge/ruff-clean-d7ff64?labelColor=261230)](#tech-stack)
-[![Python](https://img.shields.io/badge/python-3.12-3776AB)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-316%2F316%20passing-22c55e?style=flat-square)](#running-the-test-suite)
+[![mypy](https://img.shields.io/badge/mypy-strict-3178c6?style=flat-square)](https://mypy.readthedocs.io/)
+[![ruff](https://img.shields.io/badge/ruff-clean-d7ff64?style=flat-square&labelColor=261230)](https://docs.astral.sh/ruff/)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![pgvector](https://img.shields.io/badge/pgvector-0.8-336791?style=flat-square)](https://github.com/pgvector/pgvector)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0%20async-D71F00?style=flat-square)](https://www.sqlalchemy.org/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![Docker](https://img.shields.io/badge/Docker-required-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![React](https://img.shields.io/badge/React-TanStack%20Start-61DAFB?style=flat-square&logo=react&logoColor=black)](https://tanstack.com/start)
+[![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 ---
 
