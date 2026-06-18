@@ -196,7 +196,7 @@ class AggregationService:
             )
         ).scalar_one_or_none()
         if existing is not None:
-            existing.last_seen_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            existing.last_seen_at = datetime.now(UTC)
             self.db.add(existing)
             await self.db.commit()
             return True  # already exists
@@ -210,7 +210,7 @@ class AggregationService:
         if cross is not None:
             # Count the extra sighting so the REPOST FREQUENCY signal can fire
             cross.source_sightings = (cross.source_sightings or 1) + 1
-            cross.last_seen_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            cross.last_seen_at = datetime.now(UTC)
             self.db.add(cross)
             await self.db.commit()
             return True  # cross-source duplicate

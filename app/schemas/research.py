@@ -19,8 +19,8 @@ class ResearchOpportunitySchema(BaseModel):
     contact_email: str | None
     url: str | None
     source: str
-    posted_at: str | None
-    last_seen_at: str
+    posted_at: datetime | None
+    last_seen_at: datetime
     created_at: datetime
 
     model_config = {"from_attributes": True}

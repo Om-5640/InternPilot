@@ -47,8 +47,8 @@ class PostingSchema(BaseModel):
     stipend: int | None
     source: str
     source_url: str
-    posted_at: str | None
-    last_seen_at: str
+    posted_at: datetime | None
+    last_seen_at: datetime
     status: str
     ghost_score: float
     is_ghost: bool
@@ -59,8 +59,16 @@ class PostingSchema(BaseModel):
     def _ser_id(self, v: uuid.UUID) -> str:
         return str(v)
 
-    @field_serializer("created_at", "updated_at")
+    @field_serializer("created_at", "updated_at", "last_seen_at")
     def _ser_ts(self, v: datetime) -> str:
+        if v.tzinfo is None:
+            return v.isoformat() + "Z"
+        return v.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @field_serializer("posted_at")
+    def _ser_posted_at(self, v: datetime | None) -> str | None:
+        if v is None:
+            return None
         if v.tzinfo is None:
             return v.isoformat() + "Z"
         return v.strftime("%Y-%m-%dT%H:%M:%SZ")

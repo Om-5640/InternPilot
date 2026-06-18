@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
@@ -10,7 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.llm.embeddings import EMBEDDING_DIM
-from app.models.base import Base, TimestampMixin
+from app.models.base import Base, TimestampMixin, UTCDateTime
 
 
 class PostingWorkMode(enum.StrEnum):
@@ -55,8 +56,8 @@ class Posting(Base, TimestampMixin):
     stipend: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     source_url: Mapped[str] = mapped_column(String(2000), nullable=False, unique=True, index=True)
-    posted_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    last_seen_at: Mapped[str] = mapped_column(String(50), nullable=False)
+    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_seen_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="active", server_default="active"
     )

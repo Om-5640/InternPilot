@@ -481,10 +481,19 @@ async def create_opportunity(
     contact_email: str | None = None,
     url: str | None = None,
     source: str = "seed",
-    posted_at: str | None = None,
+    posted_at: str | datetime | None = None,
     extra: dict[str, Any] | None = None,
 ) -> ResearchOpportunity:
-    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    now = datetime.now(UTC)
+    _posted_at: datetime | None = None
+    if isinstance(posted_at, datetime):
+        _posted_at = posted_at
+    elif isinstance(posted_at, str) and posted_at:
+        try:
+            _parsed = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
+            _posted_at = _parsed if _parsed.tzinfo is not None else _parsed.replace(tzinfo=UTC)
+        except ValueError:
+            _posted_at = None
     embed_text = research_area + " " + description
     vectors = await embed([embed_text])
     opp = ResearchOpportunity(
@@ -499,7 +508,7 @@ async def create_opportunity(
         contact_email=contact_email,
         url=url,
         source=source,
-        posted_at=posted_at or now,
+        posted_at=_posted_at,
         last_seen_at=now,
         embedding=vectors[0],
     )

@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,8 @@ from app.models.notification import Notification
 from app.models.posting import Posting
 from app.services.base import BaseService
 from app.services.tracker_service import FOLLOWUP_DAYS
+
+_NEW_MATCH_DAYS: int = 7  # postings seen within this window trigger new_match
 
 _POSITIVE_OUTCOME_TYPES = frozenset({"responded", "interview", "offer"})
 _RECENT_DAYS: int = 7
@@ -133,6 +135,33 @@ class NotificationService(BaseService):
                     f"Your {role} application at {company} moved to {app.status}."
                 )
                 await self._add("status_change", content, status_existing)
+
+        # new_match — active, non-ghost postings seen recently that user hasn't applied to
+        new_match_existing = await self._existing_contents("new_match")
+        cutoff_new = now - timedelta(days=_NEW_MATCH_DAYS)
+        applied_posting_ids = {a.posting_id for a in apps}
+        fresh_rows = (
+            await self.db.execute(
+                select(Posting, Company)
+                .join(Company, Posting.company_id == Company.id)
+                .where(
+                    and_(
+                        Posting.status == "active",
+                        Posting.is_ghost.is_(False),
+                        Posting.last_seen_at >= cutoff_new,
+                        not_(Posting.id.in_(applied_posting_ids))
+                        if applied_posting_ids
+                        else Posting.id.isnot(None),
+                    )
+                )
+                .limit(10)
+            )
+        ).all()
+        for posting, company in fresh_rows:
+            content = (
+                f"New match: {posting.title} at {company.name} — apply before it's gone."
+            )
+            await self._add("new_match", content, new_match_existing)
 
         await self.db.commit()
 

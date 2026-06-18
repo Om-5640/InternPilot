@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -20,8 +21,9 @@ from app.models.user import User  # noqa: F401
 
 config = context.config
 
-# Inject DATABASE_URL from pydantic-settings (overrides the placeholder in alembic.ini)
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# TEST_DATABASE_URL env var (set by tests) takes priority over settings.DATABASE_URL
+_db_url = os.environ.get("TEST_DATABASE_URL") or settings.DATABASE_URL
+config.set_main_option("sqlalchemy.url", _db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

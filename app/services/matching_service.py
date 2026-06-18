@@ -81,11 +81,17 @@ def _compute_skill_overlap(
 
 def _freshness(posting: Posting) -> float:
     """Step-function freshness: 1.0 (0–14 d) → 0.1 (≥90 d)."""
-    date_str = posting.posted_at or posting.last_seen_at or ""
-    if not date_str:
+    raw = posting.posted_at or posting.last_seen_at
+    if not raw:
         return 0.5
+    if isinstance(raw, datetime):
+        dt = raw if raw.tzinfo is not None else raw.replace(tzinfo=UTC)
+    else:
+        try:
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return 0.5
     try:
-        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         days_old = max(0, (datetime.now(UTC) - dt).days)
         if days_old < 15:
             return 1.0

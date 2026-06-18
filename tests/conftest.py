@@ -8,7 +8,10 @@ Run:  pytest
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import pathlib
+import subprocess
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -45,28 +48,36 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://postgres:testpass@localhost:5433/internpilot_test",
 )
 
-
 # ---------------------------------------------------------------------------
-# Session-scoped engine: create tables once per test run
+# Session-scoped engine: run Alembic migrations once per test run
 # ---------------------------------------------------------------------------
 
 @pytest_asyncio.fixture(scope="session")
 async def test_engine():
+    # Export URL so alembic/env.py picks it up via os.environ
+    os.environ["TEST_DATABASE_URL"] = TEST_DATABASE_URL
+
     eng = create_async_engine(TEST_DATABASE_URL, echo=False)
+
+    # Tear down any leftover schema from a previous run
     async with eng.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.execute(text(
-            "DO $$ BEGIN "
-            "CREATE TYPE user_role AS ENUM ('student', 'admin'); "
-            "EXCEPTION WHEN duplicate_object THEN null; END $$"
-        ))
-        await conn.execute(text(
-            "DO $$ BEGIN "
-            "CREATE TYPE auth_provider_enum AS ENUM ('password', 'google'); "
-            "EXCEPTION WHEN duplicate_object THEN null; END $$"
-        ))
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.drop_all)
+
+    # Bootstrap via Alembic CLI (catches migration drift vs. plain create_all)
+    # subprocess avoids the alembic/ dir shadowing the installed package
+    result = await asyncio.to_thread(
+        subprocess.run,
+        ["uv", "run", "alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TEST_DATABASE_URL": TEST_DATABASE_URL},
+        cwd=str(pathlib.Path(__file__).parent.parent),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Alembic upgrade failed:\n{result.stderr}")
+
     yield eng
+
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await eng.dispose()

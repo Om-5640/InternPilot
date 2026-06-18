@@ -61,8 +61,14 @@ def extract_requirements(description: str) -> list[str]:
     return [b.strip() for b in bullets if 10 < len(b.strip()) < 300][:10]
 
 
-def _now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _parse_date(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+    except (ValueError, TypeError):
+        return None
 
 
 def normalize(raw: RawPosting) -> dict[str, Any]:
@@ -87,8 +93,8 @@ def normalize(raw: RawPosting) -> dict[str, Any]:
         "stipend": raw.get("stipend"),
         "source": raw["source"],
         "source_url": raw["source_url"],
-        "posted_at": raw.get("posted_at"),
-        "last_seen_at": _now_iso(),
+        "posted_at": _parse_date(raw.get("posted_at")),
+        "last_seen_at": datetime.now(UTC),
         "status": "active",
         "ghost_score": 0.0,
         "is_ghost": False,

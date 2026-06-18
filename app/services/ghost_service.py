@@ -98,11 +98,15 @@ _TECH_TERMS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def _parse_dt(s: str | None) -> datetime | None:
+def _parse_dt(s: str | datetime | None) -> datetime | None:
+    """Accept datetime or ISO string; return aware datetime or None."""
     if not s:
         return None
+    if isinstance(s, datetime):
+        return s if s.tzinfo is not None else s.replace(tzinfo=UTC)
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
     except (ValueError, TypeError, AttributeError):
         return None
 
@@ -110,8 +114,8 @@ def _parse_dt(s: str | None) -> datetime | None:
 def _days_live(posting: Posting, now: datetime) -> int:
     """Days since the earlier of posted_at and last_seen_at (fallback: last_seen_at)."""
     candidates: list[datetime] = []
-    for s in (posting.posted_at, posting.last_seen_at):
-        dt = _parse_dt(s)
+    for raw in (posting.posted_at, posting.last_seen_at):
+        dt = _parse_dt(raw)
         if dt is not None:
             candidates.append(dt)
     if not candidates:
