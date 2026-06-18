@@ -124,11 +124,11 @@ async def main() -> None:
 
         print("\n--- Part 3: Notifications + Dashboard + Evaluation ---")
 
-        # [10] GET /notifications — returns {data: [...], unread_count}
+        # [10] GET /notifications — returns list[Notification]
         r = await c.get(f"{BASE}/notifications", headers=headers)
-        d = r.json()
-        notif_count = len(d.get("data", []))
-        unread = d.get("unread_count", 0)
+        notifications = r.json()
+        notif_count = len(notifications) if isinstance(notifications, list) else 0
+        unread = sum(1 for n in notifications if not n.get("read_at")) if isinstance(notifications, list) else 0
         print(f"[10] GET /notifications -> {r.status_code}  count={notif_count}  unread={unread}")
         assert r.status_code == 200, f"Notifications failed: {r.text}"
 
