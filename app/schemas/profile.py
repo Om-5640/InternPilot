@@ -167,15 +167,18 @@ def coerce_profile_schema(profile: Any) -> ProfileSchema:
         "headline": profile.headline,
         "university": profile.university,
         "grad_year": profile.grad_year,
-        "research_interests": profile.research_interests or [],
-        "skills": profile.skills or [],
+        "research_interests": [
+            str(i) for i in (profile.research_interests or []) if isinstance(i, str)
+        ],
+        # Filter to valid strings only so malformed JSON data never breaks Pydantic validation
+        "skills": [s for s in (profile.skills or []) if isinstance(s, str) and s.strip()],
         "experience": profile.experience or [],
         "education": profile.education or [],
         "projects": profile.projects or [],
         "github_url": profile.github_url,
         "preferences": profile.preferences or {},
         "profile_strength": profile.profile_strength,
-        "gaps": profile.gaps or [],
+        "gaps": [str(g) for g in (profile.gaps or []) if g],
         "created_at": profile.created_at,
         "updated_at": profile.updated_at,
     }

@@ -146,6 +146,8 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
           grad_year: gradYear ? parseInt(gradYear, 10) : undefined,
           skills,
           research_interests: interests,
+          // Include github_url so manual entry in the field persists without needing the Connect flow
+          github_url: githubUrl || undefined,
         } as any);
         setProfile(updated);
         setSaved(true);
@@ -190,12 +192,15 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
         if (updated.skills.length > 0) setSkills(updated.skills);
         if (updated.research_interests.length > 0) setInterests(updated.research_interests);
 
-        // Build extraction summary
+        // Build extraction summary — show NEW items added vs. what was already there
+        const prevSkillCount = profile.skills.length;
+        const newSkills = updated.skills.length - prevSkillCount;
         const parts: string[] = [];
-        if (updated.skills.length > 0) parts.push(`${updated.skills.length} skills`);
-        if (updated.experience.length > 0) parts.push(`${updated.experience.length} experience entries`);
-        if (updated.education.length > 0) parts.push(`${updated.education.length} education entries`);
-        if (updated.projects.length > 0) parts.push(`${updated.projects.length} projects`);
+        if (newSkills > 0) parts.push(`${newSkills} new skill${newSkills !== 1 ? "s" : ""}`);
+        else if (updated.skills.length > 0) parts.push(`${updated.skills.length} skills (already up to date)`);
+        if (updated.experience.length > 0) parts.push(`${updated.experience.length} experience ${updated.experience.length === 1 ? "entry" : "entries"}`);
+        if (updated.education.length > 0) parts.push(`${updated.education.length} education ${updated.education.length === 1 ? "entry" : "entries"}`);
+        if (updated.projects.length > 0) parts.push(`${updated.projects.length} project${updated.projects.length !== 1 ? "s" : ""}`);
         setExtractedSummary(parts.length > 0 ? `Extracted: ${parts.join(", ")}` : "Résumé parsed — fields updated.");
         setResumeDone(true);
         setResumeFile(null);

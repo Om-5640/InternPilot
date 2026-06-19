@@ -61,3 +61,14 @@ class CohortService:
             )
         self.db.add(company)
         await self.db.commit()
+
+        # Rescore all postings for this company so their ghost_scores reflect
+        # the updated cohort data immediately (no wait for the next full refresh)
+        try:
+            from app.services.ghost_service import GhostService
+            await GhostService(self.db).rescore_company_postings(company_id)
+        except Exception as exc:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).warning(
+                "cohort_rescore_failed company=%s err=%s", company_id, exc
+            )

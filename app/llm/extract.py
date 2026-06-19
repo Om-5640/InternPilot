@@ -13,11 +13,14 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 
 from pydantic import BaseModel, ValidationError
 
 from app.core.errors import APIError
 from app.llm.router import complete
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_fences(raw: str) -> str:
@@ -74,8 +77,8 @@ async def extract_structured[T: BaseModel](
     first_raw = await complete(messages)
     try:
         return _parse_output(first_raw, schema)
-    except (json.JSONDecodeError, ValidationError, TypeError):
-        pass
+    except (json.JSONDecodeError, ValidationError, TypeError) as first_err:
+        logger.warning("extract_first_attempt_failed schema=%s err=%s", schema.__name__, first_err)
 
     retry_messages = messages + [
         {"role": "assistant", "content": first_raw},
@@ -92,6 +95,18 @@ async def extract_structured[T: BaseModel](
     try:
         return _parse_output(second_raw, schema)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
+        logger.error(
+            "extract_both_attempts_failed schema=%s first_err=%s second_err=%s",
+            schema.__name__, first_err if "first_err" in dir() else "unknown", exc,
+        )
+        if isinstance(exc, json.JSONDecodeError):
+            raise APIError(
+                422, "extraction_failed",
+                "The résumé text could not be parsed into structured data. "
+                "Try a text-based PDF (not a scanned image) or a DOCX file."
+            ) from exc
         raise APIError(
-            422, "extraction_failed", "Could not extract structured data from the provided text"
+            422, "extraction_failed",
+            "Could not extract structured data from the résumé. "
+            "Ensure it contains text-based content (not a scanned image)."
         ) from exc

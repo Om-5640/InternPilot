@@ -101,7 +101,7 @@ def _compute_strength_and_gaps(profile: Profile) -> tuple[int, list[str]]:
         gaps.append("Add a professional headline")
 
     # Skills — up to 20 pts (2 per skill, capped at 10 skills)
-    skill_count = len(profile.skills or [])
+    skill_count = len([s for s in (profile.skills or []) if isinstance(s, str) and s.strip()])
     strength += min(skill_count * 2, 20)
     if skill_count < 5:
         gaps.append(f"Add at least 5 skills (currently {skill_count})")
@@ -178,9 +178,15 @@ class ProfileService(BaseService):
         profile.profile_strength, profile.gaps = _compute_strength_and_gaps(profile)
         text = _profile_text(profile)
         if text.strip():
-            vectors = await embed([text])
-            if vectors:
-                profile.embedding = vectors[0]
+            try:
+                vectors = await embed([text])
+                if vectors:
+                    profile.embedding = vectors[0]
+            except Exception as _emb_err:  # noqa: BLE001
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "profile_embed_failed user=%s err=%s", profile.user_id, _emb_err
+                )
         self.db.add(profile)
         await self.db.commit()
         await self.db.refresh(profile)
@@ -274,8 +280,14 @@ class ProfileService(BaseService):
         if extracted.research_interests:
             profile.research_interests = extracted.research_interests
         if extracted.skills:
-            existing: set[str] = {s for s in (profile.skills or []) if isinstance(s, str)}
-            profile.skills = list(existing | set(extracted.skills))
+            # Deduplicate case-insensitively; prefer title-case from the resume extract
+            existing_lower: dict[str, str] = {
+                s.lower(): s for s in (profile.skills or []) if isinstance(s, str)
+            }
+            for skill in extracted.skills:
+                if isinstance(skill, str) and skill.strip():
+                    existing_lower.setdefault(skill.lower(), skill)
+            profile.skills = list(existing_lower.values())
         if extracted.experience:
             profile.experience = [e.model_dump() for e in extracted.experience]
         if extracted.education:

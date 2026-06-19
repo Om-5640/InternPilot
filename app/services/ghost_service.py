@@ -27,9 +27,7 @@ VAGUE_WEIGHT: float = 0.25
 COMPANY_WEIGHT: float = 0.15
 COHORT_WEIGHT: float = 0.10
 
-# Warm-start threshold; recalibrate toward 0.55 once REPOST sightings accumulate
-# and COHORT (Module 7) comes online.
-GHOST_THRESHOLD: float = 0.38
+GHOST_THRESHOLD: float = 0.50
 
 # ---------------------------------------------------------------------------
 # Vagueness heuristics
@@ -47,48 +45,31 @@ _PIPELINE_PHRASES: tuple[str, ...] = (
 
 _TECH_TERMS: frozenset[str] = frozenset(
     {
-        "python",
-        "javascript",
-        "typescript",
-        "java",
-        "go",
-        "rust",
-        "c++",
-        "c#",
-        "react",
-        "vue",
-        "angular",
-        "node",
-        "fastapi",
-        "django",
-        "flask",
-        "spring",
-        "postgresql",
-        "mysql",
-        "mongodb",
-        "redis",
-        "elasticsearch",
-        "docker",
-        "kubernetes",
-        "terraform",
-        "aws",
-        "gcp",
-        "azure",
-        "pytorch",
-        "tensorflow",
-        "scikit-learn",
-        "pandas",
-        "numpy",
-        "sql",
-        "graphql",
-        "rest",
-        "grpc",
-        "kafka",
-        "rabbitmq",
-        "git",
-        "linux",
-        "bash",
-        "shell",
+        # Languages
+        "python", "javascript", "typescript", "java", "go", "rust", "c++", "c#",
+        "kotlin", "swift", "ruby", "php", "scala", "r", "matlab", "dart",
+        # Frontend
+        "react", "vue", "angular", "svelte", "next.js", "remix", "nuxt",
+        "html", "css", "tailwind", "webpack", "vite",
+        # Backend
+        "node", "fastapi", "django", "flask", "spring", "express", "nestjs",
+        "rails", "laravel", "gin", "fiber", "actix",
+        # Databases
+        "postgresql", "mysql", "mongodb", "redis", "elasticsearch",
+        "dynamodb", "cassandra", "clickhouse", "sqlite", "neo4j", "supabase",
+        # DevOps / Cloud
+        "docker", "kubernetes", "terraform", "aws", "gcp", "azure",
+        "vercel", "netlify", "firebase", "cloudflare", "helm", "ansible",
+        "ci/cd", "github actions", "jenkins",
+        # ML / AI
+        "pytorch", "tensorflow", "scikit-learn", "pandas", "numpy",
+        "hugging face", "transformers", "jax", "keras", "xgboost",
+        "langchain", "openai", "llm", "bert", "gpt",
+        # Data
+        "sql", "spark", "hadoop", "airflow", "dbt", "snowflake", "bigquery",
+        # Tools / Protocols
+        "graphql", "rest", "grpc", "kafka", "rabbitmq", "celery",
+        "git", "linux", "bash", "shell", "postman",
     }
 )
 
@@ -195,13 +176,16 @@ def company_ghost_score(company: Company) -> float:
 def cohort_response_signal(company: Company) -> float:
     """Cross-user response signal.
 
-    Returns 0.0 (neutral) when applied count < MIN_COHORT_APPS.
-    Once enough data exists, unresponsive companies raise the ghost score.
+    Uses linear interpolation from 0→MIN_COHORT_APPS applications so the
+    signal grows smoothly instead of jumping at a hard threshold.
     """
     applied = getattr(company, "cohort_applied_count", None) or 0
-    if applied < MIN_COHORT_APPS:
+    if applied <= 0:
         return 0.0
-    return max(0.0, min(1.0, 1.0 - float(company.responsiveness_score or 1.0)))
+    responsiveness = float(company.responsiveness_score or 1.0)
+    # alpha ramps from 0.0 (1 app) to 1.0 (MIN_COHORT_APPS apps)
+    alpha = min(1.0, applied / MIN_COHORT_APPS)
+    return max(0.0, min(1.0, alpha * (1.0 - responsiveness)))
 
 
 def compute_ghost_score(
@@ -225,22 +209,34 @@ def build_signals(
     company: Company,
     now: datetime,
 ) -> list[str]:
-    """Human-readable triggered signals, e.g. ["Live 73 days", "Seen on 2 boards", "Vague JD"]."""
+    """Human-readable signals explaining the ghost score for the user."""
     signals: list[str] = []
     days = _days_live(posting, now)
     a_s = age_score(posting, now)
     r_s = repost_score(posting.source_sightings)
     v_s = vague_jd_score(posting)
     c_s = company_ghost_score(company)
+    co_s = cohort_response_signal(company)
 
-    if a_s > 0.0:
-        signals.append(f"Live {days} days")
+    # Always show how long the posting has been live so users can judge freshness
+    signals.append(f"Live {days} days")
+
     if r_s > 0.0:
-        signals.append(f"Seen on {posting.source_sightings} boards")
-    if v_s >= 0.3:
-        signals.append("Vague JD")
-    if c_s >= 0.3:
-        signals.append("Company has ghost history")
+        boards = posting.source_sightings or 1
+        signals.append(f"Seen on {boards} job boards")
+    if v_s >= 0.25:
+        if v_s >= 0.7:
+            signals.append("Very vague job description")
+        else:
+            signals.append("Vague job description")
+    if c_s >= 0.25:
+        signals.append(f"Company has ghost history ({int(c_s * 100)}% avg score)")
+    if co_s >= 0.15:
+        applied = getattr(company, "cohort_applied_count", 0) or 0
+        responsiveness = float(company.responsiveness_score or 1.0)
+        signals.append(
+            f"Low response rate ({int(responsiveness * 100)}% from {applied} applications)"
+        )
     return signals
 
 
@@ -260,7 +256,7 @@ class GhostService:
         """
         rows = (
             await self.db.execute(
-                select(Posting, Company).join(Company, Posting.company_id == Company.id)
+                select(Posting, Company).outerjoin(Company, Posting.company_id == Company.id)
             )
         ).all()
 
@@ -272,7 +268,10 @@ class GhostService:
         company_by_id: dict[uuid.UUID, Company] = {}
         for r in rows:
             p: Posting = r[0]
-            c: Company = r[1]
+            c: Company | None = r[1]
+            if c is None:
+                logger.warning("Posting %s has no company record; skipping rescore", p.id)
+                continue
             postings.append(p)
             company_by_posting[p.id] = c
             company_by_id[c.id] = c
@@ -307,6 +306,28 @@ class GhostService:
 
         flagged = sum(1 for p in postings if p.is_ghost)
         return {"rescored": len(postings), "flagged_ghost": flagged}
+
+    async def rescore_company_postings(self, company_id: uuid.UUID) -> int:
+        """Rescore all postings for a single company. Called after cohort data changes."""
+        rows = (
+            await self.db.execute(
+                select(Posting, Company)
+                .join(Company, Posting.company_id == Company.id)
+                .where(Posting.company_id == company_id)
+            )
+        ).all()
+        if not rows:
+            return 0
+        now = datetime.now(UTC)
+        for r in rows:
+            posting: Posting = r[0]
+            company: Company = r[1]
+            score = compute_ghost_score(posting, company, now)
+            posting.ghost_score = score
+            posting.is_ghost = score >= GHOST_THRESHOLD
+            self.db.add(posting)
+        await self.db.commit()
+        return len(rows)
 
     async def rescore_posting(self, posting_id: uuid.UUID) -> PostingGhostDetail | None:
         """Re-score a single posting and return its ghost detail. Returns None if not found."""

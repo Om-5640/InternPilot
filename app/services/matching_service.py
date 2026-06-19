@@ -499,9 +499,12 @@ class MatchingService:
             min(1.0, SEMANTIC_WEIGHT * semantic_sim + SKILL_WEIGHT * skill_ratio),
         )
         response_likelihood = _compute_response_likelihood(posting, company)
+        # Cap ghost penalty so even a ghost_score of 1.0 only reduces EV by 70%.
+        # This keeps rankings stable as ghost scores accumulate real data over time.
+        ghost_penalty = 1.0 - min(0.70, posting.ghost_score)
         expected_value = max(
             0.0,
-            min(1.0, match_score * response_likelihood * (1.0 - posting.ghost_score)),
+            min(1.0, match_score * response_likelihood * ghost_penalty),
         )
         explanation = _build_explanation(matched, missing, semantic_sim, company=company)
         posting_schema = coerce_posting_schema(posting, company)
