@@ -763,13 +763,89 @@ async def run_research_pipeline(
     dry_run: bool,
     use_llm: bool,
 ) -> dict[str, int]:
-    """Seed / refresh research opportunities with live arXiv papers and LLM descriptions."""
+    """Seed / refresh research opportunities from live Firecrawl + curated labs."""
     logger.info("=== RESEARCH OPPORTUNITIES PIPELINE ===")
     from app.llm.embeddings import embed
 
     inserted = updated = skipped = errors = 0
 
+    # ---- Phase A: Live Firecrawl scraping (Tier 1 portals) ----
+    firecrawl_opps: list[dict[str, Any]] = []
+    if settings.FIRECRAWL_API_KEY and not dry_run:
+        from app.sources.firecrawl_research import fetch_research_opportunities as _fc_fetch
+        logger.info("Firecrawl: scraping %d Tier 1 research portals…", 12)
+        firecrawl_opps = await _fc_fetch(settings.FIRECRAWL_API_KEY, _llm_with_cooldown)
+        logger.info("Firecrawl: %d opportunities extracted", len(firecrawl_opps))
+    else:
+        if not settings.FIRECRAWL_API_KEY:
+            logger.info("FIRECRAWL_API_KEY not set — using curated labs only")
+
     async with session_factory() as db:
+        # ---- Upsert Firecrawl opportunities ----
+        for opp_data in firecrawl_opps:
+            try:
+                existing = (
+                    await db.execute(
+                        select(ResearchOpportunity)
+                        .where(
+                            ResearchOpportunity.professor_name == opp_data["professor_name"],
+                            ResearchOpportunity.institution == opp_data["institution"],
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if dry_run:
+                    logger.info("[dry-run] firecrawl: %s @ %s", opp_data["professor_name"], opp_data["institution"])
+                    inserted += 1
+                    continue
+
+                embed_text = (
+                    f"{opp_data['professor_name']} {opp_data['institution']} "
+                    f"{opp_data['research_area']}. {opp_data['description'][:500]}"
+                )
+                vectors = await embed([embed_text])
+                embedding = vectors[0] if vectors else None
+
+                if existing is None:
+                    opp = ResearchOpportunity(
+                        professor_name=opp_data["professor_name"],
+                        institution=opp_data["institution"],
+                        lab_name=opp_data.get("lab_name"),
+                        research_area=opp_data["research_area"],
+                        description=opp_data["description"],
+                        desired_skills=opp_data.get("desired_skills", []),
+                        program=opp_data.get("program"),
+                        region=opp_data.get("region"),
+                        contact_email=opp_data.get("contact_email"),
+                        url=opp_data.get("url"),
+                        source="firecrawl",
+                        posted_at=datetime.now(UTC),
+                        last_seen_at=datetime.now(UTC),
+                        embedding=embedding,
+                    )
+                    db.add(opp)
+                    await db.commit()
+                    inserted += 1
+                    logger.info("  [fc] inserted: %s @ %s", opp_data["professor_name"], opp_data["institution"])
+                else:
+                    existing.description = opp_data["description"]
+                    existing.last_seen_at = datetime.now(UTC)
+                    existing.source = "firecrawl"
+                    if opp_data.get("desired_skills"):
+                        existing.desired_skills = opp_data["desired_skills"]
+                    if embedding:
+                        existing.embedding = embedding
+                    db.add(existing)
+                    await db.commit()
+                    updated += 1
+                    logger.info("  [fc] updated: %s @ %s", opp_data["professor_name"], opp_data["institution"])
+
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("firecrawl upsert failed %s: %s", opp_data.get("professor_name"), exc)
+                await db.rollback()
+                errors += 1
+
+        # ---- Phase B: Curated labs (with arXiv enrichment) ----
         for lab in _RESEARCH_LABS:
             try:
                 # Check if already in DB by professor_name + institution
@@ -830,8 +906,11 @@ async def run_research_pipeline(
                     inserted += 1
                     continue
 
-                # ---- Compute embedding ----
-                embed_text = f"{lab['professor_name']} {lab['research_area']} {' '.join(lab['desired_skills'])}"
+                # ---- Compute embedding (rich text improves semantic match quality) ----
+                embed_text = (
+                    f"{lab['professor_name']} {lab['institution']} "
+                    f"{lab['research_area']}. {lab['description'][:500]}"
+                )
                 vectors = await embed([embed_text])
                 embedding = vectors[0] if vectors else None
 

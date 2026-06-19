@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState, useRef } from "react";
 import { CalmBackground } from "@/components/live-background";
 import { Nav } from "@/components/nav";
 import { api, useApi } from "@/lib/api-client";
 import { Pill } from "@/components/ui-bits";
 import { LoadingState, ErrorState, EmptyState } from "@/components/data-states";
-import { Send, Linkedin, RefreshCw } from "lucide-react";
+import { Send, Linkedin, RefreshCw, Pencil } from "lucide-react";
 import type { Contact, Referral } from "@/lib/mocks";
 
 export const Route = createFileRoute("/referrals")({
@@ -16,7 +17,9 @@ export const Route = createFileRoute("/referrals")({
 });
 
 function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Referral | undefined }) {
-  // Load the generated intro artifact if one exists
+  const [isEditing, setIsEditing] = useState(false);
+  const editRef = useRef<HTMLDivElement>(null);
+
   const { data: artifact, loading: artLoading } = useApi(
     () => referral?.intro_artifact_id ? api.getArtifact(referral.intro_artifact_id) : Promise.resolve(undefined),
     [referral?.intro_artifact_id],
@@ -24,10 +27,40 @@ function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Re
 
   const introContent = artifact?.content;
 
+  const handleTweak = () => {
+    setIsEditing(true);
+    // Focus the editable div after React re-renders
+    setTimeout(() => {
+      if (editRef.current) {
+        editRef.current.focus();
+        // Move cursor to end
+        const range = document.createRange();
+        range.selectNodeContents(editRef.current);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }, 30);
+  };
+
+  const templateLines = [
+    `Hi ${contact.name.split(" ")[0]},`,
+    `I noticed you work at ${contact.company_name} — I'm a student who just came across a role there and wanted to reach out. I'd love to learn more about your experience on the team and whether you'd be open to a quick 15-minute chat.`,
+    `Happy to share my resume and a short project demo upfront if that's more useful than coffee.`,
+    `Thanks so much either way.`,
+  ];
+  const templateText = templateLines.join("\n\n");
+
   return (
     <div className="card-soft p-8">
-      <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground font-mono">
-        Drafted intro · {contact.name}
+      <div className="flex items-center justify-between">
+        <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground font-mono">
+          Drafted intro · {contact.name}
+        </div>
+        {isEditing && (
+          <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Editing</span>
+        )}
       </div>
       <h2 className="mt-2 font-display text-2xl">
         Subject: Your school → {contact.company_name} team
@@ -37,16 +70,17 @@ function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Re
         <div className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
           <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading draft…
         </div>
-      ) : introContent ? (
+      ) : (introContent || isEditing) ? (
         <div
-          className="mt-5 leading-relaxed text-[15px] font-display whitespace-pre-wrap"
+          ref={editRef}
+          className="mt-5 leading-relaxed text-[15px] font-display whitespace-pre-wrap outline-none focus:ring-2 focus:ring-primary/20 rounded-lg p-2 -mx-2"
           contentEditable
           suppressContentEditableWarning
         >
-          {introContent}
+          {introContent ?? templateText}
         </div>
       ) : (
-        <div className="mt-5 leading-relaxed text-[15px] font-display space-y-3">
+        <div className="mt-5 leading-relaxed text-[15px] font-display space-y-3 text-foreground/90">
           <p>Hi {contact.name.split(" ")[0]},</p>
           <p>
             I noticed you work at {contact.company_name} — I&apos;m a student who just came across
@@ -63,10 +97,11 @@ function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Re
 
       <div className="mt-6 flex justify-end gap-2">
         <button
-          className="rounded-full border bg-white px-4 py-2 text-xs hover:bg-secondary"
+          onClick={handleTweak}
+          className="inline-flex items-center gap-1.5 rounded-full border bg-white px-4 py-2 text-xs hover:bg-secondary"
           style={{ borderColor: "var(--color-hairline)" }}
         >
-          Tweak draft
+          <Pencil className="h-3 w-3" /> Tweak draft
         </button>
         <button
           onClick={() => referral && api.setReferralStatus(referral.id, "requested")}
