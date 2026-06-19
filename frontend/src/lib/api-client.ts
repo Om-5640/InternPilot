@@ -405,7 +405,7 @@ function mapContact(raw: any): Contact {
   return {
     id: String(raw.id),
     name: raw.name ?? "",
-    company_id: String(raw.company_id),
+    company_id: raw.company_id ? String(raw.company_id) : "",
     company_name: raw.company_name ?? "",
     role: raw.role ?? "",
     university: raw.university ?? "",
@@ -732,8 +732,8 @@ export const api = {
   // ---------- Referrals ----------
   async getReferralCandidates(posting_id?: string): Promise<Contact[]> {
     if (!shouldUseMocks()) {
-      const qs = posting_id ? `?posting_id=${posting_id}` : "";
-      const raw = await http<any>(`/referrals/candidates${qs}`);
+      if (!posting_id) return [];
+      const raw = await http<any>(`/referrals/candidates?posting_id=${posting_id}`);
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
       return items.map(mapContact);
     }

@@ -197,11 +197,34 @@ class ResearchService(BaseService):
         profile_skills = [str(s) for s in (profile.skills or [])]
         top_interest = interests[0] if interests else "research"
 
-        matches = [
-            self._score_opportunity(row[0], float(row[1]), profile_skills, top_interest)
-            for row in rows
-        ]
-        matches.sort(key=lambda m: m.fit_score, reverse=True)
+        if rows:
+            matches = [
+                self._score_opportunity(row[0], float(row[1]), profile_skills, top_interest)
+                for row in rows
+            ]
+            matches.sort(key=lambda m: m.fit_score, reverse=True)
+        else:
+            # Fallback: no embeddings yet — return recency-ranked results without semantic score
+            fallback = (
+                await self.db.execute(
+                    select(ResearchOpportunity)
+                    .order_by(ResearchOpportunity.last_seen_at.desc())
+                    .limit(limit * 3)
+                )
+            ).scalars().all()
+            matches = [
+                ResearchMatchSchema(
+                    opportunity=_coerce_opportunity(r),
+                    fit_score=0.5,
+                    fit_explanation=(
+                        f"Your interest in {top_interest!r} is being matched — "
+                        "full semantic ranking will appear once the background sync completes."
+                    ),
+                    matched_skills=[],
+                    missing_skills=[str(s) for s in (r.desired_skills or [])],
+                )
+                for r in fallback
+            ]
 
         total = len(matches)
         start = (page - 1) * limit

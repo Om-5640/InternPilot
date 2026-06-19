@@ -27,7 +27,7 @@ class ResearchOpportunity(Base, TimestampMixin):
     program: Mapped[str | None] = mapped_column(String(200), nullable=True)
     region: Mapped[str | None] = mapped_column(String(200), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(2000), nullable=True, unique=True, index=True)
     source: Mapped[str] = mapped_column(
         String(50), nullable=False, default="manual", server_default="manual"
     )

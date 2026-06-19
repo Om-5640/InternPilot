@@ -220,7 +220,7 @@ class AggregationService:
         # 2. Check by dedup_key (cross-source duplicate — different URL, same role)
         cross = (
             await self.db.execute(
-                select(Posting).where(Posting.dedup_key == dedup_key)
+                select(Posting).where(Posting.dedup_key == dedup_key).limit(1)
             )
         ).scalar_one_or_none()
         if cross is not None:

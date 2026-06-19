@@ -16,8 +16,10 @@ export const Route = createFileRoute("/referrals")({
   component: Referrals,
 });
 
-function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Referral | undefined }) {
+function IntroDraftPanel({ contact, referral, draftLoading }: { contact: Contact; referral: Referral | undefined; draftLoading?: boolean }) {
   const [isEditing, setIsEditing] = useState(false);
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendDone, setSendDone] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
 
   const { data: artifact, loading: artLoading } = useApi(
@@ -66,9 +68,10 @@ function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Re
         Subject: Your school → {contact.company_name} team
       </h2>
 
-      {artLoading ? (
+      {(draftLoading || artLoading) ? (
         <div className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
-          <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading draft…
+          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+          {draftLoading ? "Generating warm intro with AI…" : "Loading draft…"}
         </div>
       ) : (introContent || isEditing) ? (
         <div
@@ -104,11 +107,23 @@ function IntroDraftPanel({ contact, referral }: { contact: Contact; referral: Re
           <Pencil className="h-3 w-3" /> Tweak draft
         </button>
         <button
-          onClick={() => referral && api.setReferralStatus(referral.id, "requested")}
-          disabled={!referral}
+          onClick={async () => {
+            if (!referral || sendLoading || sendDone) return;
+            setSendLoading(true);
+            try {
+              await api.setReferralStatus(referral.id, "requested");
+              setSendDone(true);
+            } catch (e) {
+              console.error("Failed to update referral status:", e);
+            } finally {
+              setSendLoading(false);
+            }
+          }}
+          disabled={!referral || sendLoading || sendDone}
           className="inline-flex items-center gap-1.5 rounded-full bg-primary text-primary-foreground px-4 py-2 text-xs font-medium hover:bg-[color:var(--primary-hover)] disabled:opacity-60"
         >
-          <Send className="h-3.5 w-3.5" /> Send intro request
+          {sendLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          {sendDone ? "Sent!" : sendLoading ? "Sending…" : "Send intro request"}
         </button>
       </div>
     </div>
@@ -269,6 +284,7 @@ function Referrals() {
                 <IntroDraftPanel
                   contact={selectedContact}
                   referral={activeReferral}
+                  draftLoading={creating.has(selectedContact.id)}
                 />
               )}
             </div>

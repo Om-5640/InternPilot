@@ -51,8 +51,35 @@ def _extract_int_array(text: str) -> list[int] | None:
             except (json.JSONDecodeError, ValueError):
                 continue
     return None
-MAX_TERMS = 5
+MAX_TERMS = 8           # increased: synonym expansion yields more terms per interest
 LLM_BATCH = 12          # postings per Mistral call — keeps token count bounded
+
+# Job-board vocabulary is rarely "biotechnology research intern" — map academic
+# interest labels to the terms that actually appear in listings.
+_INTEREST_SYNONYMS: dict[str, list[str]] = {
+    "biotechnology": ["biotech", "biology", "molecular biology", "life sciences", "biochemistry"],
+    "microtechnology": ["nanotechnology", "MEMS", "semiconductor", "nanoscale engineering", "microsystems"],
+    "microbiology": ["microbiology", "biology", "life sciences", "biotech"],
+    "ai-ml": ["machine learning", "artificial intelligence", "deep learning", "NLP"],
+    "ai": ["artificial intelligence", "machine learning", "deep learning"],
+    "machine learning": ["machine learning", "deep learning", "NLP", "computer vision"],
+    "deep learning": ["deep learning", "neural network", "computer vision", "ML"],
+    "nlp": ["natural language processing", "NLP", "computational linguistics"],
+    "computer vision": ["computer vision", "image recognition", "CV research"],
+    "data science": ["data science", "machine learning", "statistical analysis"],
+    "neuroscience": ["neuroscience", "computational neuroscience", "brain research"],
+    "quantum computing": ["quantum computing", "quantum information", "quantum algorithm"],
+    "robotics": ["robotics", "autonomous systems", "robot", "control systems"],
+    "climate": ["climate science", "environmental science", "sustainability research"],
+    "materials science": ["materials science", "materials engineering", "nanomaterials"],
+    "bioinformatics": ["bioinformatics", "computational biology", "genomics"],
+    "genomics": ["genomics", "bioinformatics", "computational biology"],
+    "chemistry": ["chemistry", "organic chemistry", "chemical engineering"],
+    "physics": ["physics", "computational physics", "applied physics"],
+    "mathematics": ["mathematics", "applied math", "computational math"],
+    "cybersecurity": ["cybersecurity", "information security", "network security"],
+    "systems biology": ["systems biology", "bioinformatics", "computational biology"],
+}
 
 _SKIP_SKILLS = {
     "git", "github", "linux", "bash", "html", "css", "json",
@@ -112,31 +139,56 @@ def extract_research_search_terms(
 ) -> list[tuple[str, str]]:
     """
     Returns (search_term, research_area) pairs.
+    Expands academic interest labels to job-board vocabulary via _INTEREST_SYNONYMS.
     research_area is stored on the ResearchOpportunity for semantic matching.
     """
     pairs: list[tuple[str, str]] = []
+    seen_terms: set[str] = set()
 
-    for interest in research_interests[:3]:
-        interest = interest.strip()
-        if interest and len(interest) > 2:
-            pairs.append((f"{interest} research intern", interest))
+    def _add(term: str, area: str) -> None:
+        t = term.strip()
+        if t and t not in seen_terms and len(pairs) < MAX_TERMS:
+            seen_terms.add(t)
+            pairs.append((t, area))
 
+    for interest in research_interests[:4]:
+        raw_interest = interest.strip()
+        if not raw_interest or len(raw_interest) <= 2:
+            continue
+        key = raw_interest.lower()
+        synonyms = _INTEREST_SYNONYMS.get(key)
+        if synonyms:
+            # Use first synonym as primary search term (most job-board-friendly)
+            _add(f"{synonyms[0]} intern", raw_interest)
+            # Add a second synonym as a separate search term for coverage
+            if len(synonyms) > 1:
+                _add(f"{synonyms[1]} research internship", raw_interest)
+        else:
+            # Verbatim interest — may still match some postings
+            _add(f"{raw_interest} intern", raw_interest)
+            _add(f"{raw_interest} research assistant", raw_interest)
+
+    # REU-style search for the top interest
     if research_interests:
         top = research_interests[0].strip()
         if top:
-            pairs.append((f"REU {top} undergraduate research", top))
+            key = top.lower()
+            synonyms = _INTEREST_SYNONYMS.get(key, [top])
+            _add(f"REU {synonyms[0]} undergraduate research", top)
 
+    # Skill-based terms to fill remaining slots
     meaningful = [
         s for s in skills
         if s.lower().strip() not in _SKIP_SKILLS and len(s) > 2
     ]
-    for skill in meaningful[: MAX_TERMS - len(pairs)]:
-        pairs.append((f"{skill} research assistant internship", skill))
+    for skill in meaningful:
+        _add(f"{skill} research internship", skill)
 
     if not pairs:
         pairs = [
             ("computer science research internship", "Computer Science"),
             ("STEM undergraduate research REU", "STEM Research"),
+            ("machine learning research intern", "Machine Learning"),
         ]
 
     return pairs[:MAX_TERMS]
@@ -214,7 +266,7 @@ def research_basic_filter(
         if (any(w in title for w in _SENIOR_WORDS) or bool(_LEAD_RE.search(title))) and "intern" not in title:
             continue
 
-        combined = title + " " + description[:300].lower()
+        combined = title + " " + description[:800].lower()
         if not any(signal in combined for signal in _RESEARCH_SIGNALS):
             continue
 
@@ -346,6 +398,16 @@ async def _upsert_research_opportunity(
     except Exception:  # noqa: BLE001
         pass
 
+    # Parse posted_at from string if available
+    _posted_at: datetime | None = None
+    if raw_ro.get("posted_at"):
+        try:
+            s = str(raw_ro["posted_at"]).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            _posted_at = dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+        except (ValueError, TypeError):
+            pass
+
     db.add(ResearchOpportunity(
         professor_name=raw_ro["professor_name"],
         institution=raw_ro["institution"],
@@ -358,7 +420,7 @@ async def _upsert_research_opportunity(
         contact_email=raw_ro["contact_email"],
         url=url,
         source=raw_ro["source"],
-        posted_at=None,
+        posted_at=_posted_at,
         last_seen_at=datetime.now(UTC),
         embedding=embedding,
     ))
@@ -472,7 +534,44 @@ class ResearchAggregationService:
                 logger.warning("research_upsert_failed url=%s err=%s", raw_ro.get("url"), exc)
                 await self.db.rollback()
 
-        # ── 5. Update cache ──────────────────────────────────────────────────
+        # ── 5. Firecrawl Tier-1 programs (SURF, NSF REU, DAAD RISE, CERN, etc.) ─
+        firecrawl_key = getattr(settings, "FIRECRAWL_API_KEY", "")
+        if firecrawl_key:
+            try:
+                from app.llm.router import complete as _llm_fn
+                from app.sources.firecrawl_research import fetch_research_opportunities
+                firecrawl_opps = await fetch_research_opportunities(
+                    firecrawl_key, _llm_fn, max_pages=4
+                )
+                for opp in firecrawl_opps:
+                    if not opp.get("url") or not opp.get("description"):
+                        continue
+                    raw_ro = RawResearchOpportunity(
+                        professor_name=str(opp.get("professor_name") or "Program Team"),
+                        institution=str(opp.get("institution") or "Unknown"),
+                        lab_name=opp.get("lab_name"),
+                        research_area=str(opp.get("research_area") or "Research"),
+                        description=str(opp.get("description") or ""),
+                        desired_skills=list(opp.get("desired_skills") or []),
+                        program=opp.get("program"),
+                        region=opp.get("region"),
+                        contact_email=opp.get("contact_email"),
+                        url=str(opp.get("url") or ""),
+                        source="firecrawl",
+                        posted_at=None,
+                    )
+                    try:
+                        duped = await _upsert_research_opportunity(self.db, raw_ro)
+                        if not duped:
+                            ingested += 1
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("firecrawl_upsert_failed url=%s err=%s", raw_ro.get("url"), exc)
+                        await self.db.rollback()
+                logger.info("research_refresh fp=%s firecrawl=%d", fingerprint[:8], len(firecrawl_opps))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("firecrawl_research_failed: %s", exc)
+
+        # ── 6. Update cache ──────────────────────────────────────────────────
         now = datetime.now(UTC)
         terms_list = [t for t, _ in term_area_pairs]
         existing_cache = (
@@ -502,6 +601,7 @@ class ResearchAggregationService:
             "research_refresh_done fp=%s raw=%d basic=%d mistral=%d ingested=%d",
             fingerprint[:8], len(raw_pairs), len(filtered), len(relevant), ingested,
         )
+
         return ingested
 
 
