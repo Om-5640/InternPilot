@@ -53,16 +53,19 @@ LLM_BATCH_SIZE = 12          # postings per LLM call
 
 _SKIP_SKILLS = {
     "git", "github", "linux", "bash", "http", "html", "css", "json", "xml",
-    "rest", "excel", "word", "powerpoint", "google", "microsoft", "postman",
+    "rest", "powerpoint", "postman",
     "cursor", "n8n", "rest apis", "object-oriented programming", "oop",
     "data structures", "data structures & algorithms", "algorithms",
 }
 
-# Senior-level title words that disqualify a posting unless "intern" also appears
+# Senior-level title words that disqualify a posting unless "intern" also appears.
+# "lead" is handled separately via word-boundary regex to catch "team lead" endings.
 _SENIOR_WORDS = {
     "senior", "sr.", "staff", "principal", "director", "vp", "vice president",
-    "head of", "manager", "lead ", "architect", "distinguished", "fellow",
+    "head of", "manager", "architect", "distinguished", "fellow", "executive",
 }
+
+_LEAD_RE = re.compile(r"\blead\b")
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +110,7 @@ def basic_filter(raws: list[RawPosting]) -> list[RawPosting]:
     """
     Drop postings that:
     - Have no source_url or empty title
-    - Have a description shorter than 50 characters
+    - Have a description shorter than 50 characters (after stripping HTML/whitespace)
     - Are clearly senior-level roles without 'intern' in the title
     Deduplicate by (lowercase title, lowercase company).
     """
@@ -117,17 +120,23 @@ def basic_filter(raws: list[RawPosting]) -> list[RawPosting]:
     for raw in raws:
         title = str(raw.get("title") or "").strip()
         url = str(raw.get("source_url") or "").strip()
-        description = str(raw.get("description") or "")
         company = str(raw.get("company_name") or "").strip()
 
         if not title or not url:
             continue
-        if len(description) < 50:
+        if not url.startswith("http"):
+            continue
+
+        description = _strip_html(str(raw.get("description") or ""))
+        if len(description) < 50:  # noqa: PLR2004
             continue
 
         title_lower = title.lower()
         is_intern = "intern" in title_lower
-        if not is_intern and any(w in title_lower for w in _SENIOR_WORDS):
+        if not is_intern and (
+            any(w in title_lower for w in _SENIOR_WORDS)
+            or bool(_LEAD_RE.search(title_lower))
+        ):
             continue
 
         key = (title_lower, company.lower())
@@ -145,7 +154,11 @@ def basic_filter(raws: list[RawPosting]) -> list[RawPosting]:
 # ---------------------------------------------------------------------------
 
 def _strip_html(text: str) -> str:
-    return re.sub(r"<[^>]+>", " ", text).strip()
+    import html as _html
+    cleaned = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = _html.unescape(cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 async def llm_filter_postings(

@@ -29,12 +29,16 @@ class RemotiveSource:
                 for job in jobs:
                     if not isinstance(job, dict):
                         continue
+                    title = str(job.get("title") or "").strip()
+                    url = str(job.get("url") or "").strip()
+                    if not title or not url:
+                        continue
                     results.append({
-                        "title": str(job.get("title") or ""),
-                        "company_name": str(job.get("company_name") or ""),
+                        "title": title,
+                        "company_name": str(job.get("company_name") or "").strip(),
                         "description": str(job.get("description") or ""),
                         "source": "remotive",
-                        "source_url": str(job.get("url") or ""),
+                        "source_url": url,
                         "location": "Remote",
                         "work_mode": "remote",
                         "stipend": None,

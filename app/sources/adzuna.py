@@ -93,14 +93,14 @@ def _parse_job(job: dict[str, object]) -> RawPosting | None:
     description = str(j.get("description") or "")
     location_obj: dict[str, Any] = j.get("location") or {}
     area = location_obj.get("area") or []
-    location: str | None = ", ".join(str(a) for a in area if a) or None
+    location: str | None = ", ".join(str(a) for a in area if a) or None if isinstance(area, list) else None
 
-    # Salary → monthly stipend estimate
+    # Salary → monthly stipend estimate (Adzuna reports annual USD)
     stipend: int | None = None
     sal_min = j.get("salary_min")
     if isinstance(sal_min, int | float) and sal_min > 0:
-        # Adzuna salaries are typically annual
-        stipend = int(sal_min / 12)
+        monthly = int(sal_min / 12)
+        stipend = monthly if 200 <= monthly <= 15_000 else None
 
     posted_at = str(j.get("created") or "")
 

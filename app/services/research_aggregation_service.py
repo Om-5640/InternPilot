@@ -55,20 +55,23 @@ MAX_TERMS = 5
 LLM_BATCH = 12          # postings per Mistral call — keeps token count bounded
 
 _SKIP_SKILLS = {
-    "git", "github", "linux", "bash", "html", "css", "json", "excel",
-    "word", "powerpoint", "n8n", "cursor", "postman", "rest", "rest apis",
+    "git", "github", "linux", "bash", "html", "css", "json",
+    "powerpoint", "n8n", "cursor", "postman", "rest", "rest apis",
     "object-oriented programming", "oop", "data structures & algorithms",
 }
 
 _SENIOR_WORDS = {
     "senior", "sr.", "staff", "principal", "director", "vp", "vice president",
-    "head of", "manager", "lead ", "architect", "fellow", "distinguished",
+    "head of", "manager", "architect", "fellow", "distinguished", "executive",
 }
+
+_LEAD_RE = re.compile(r"\blead\b")
 
 # A posting must contain at least one of these signals to survive basic_filter
 _RESEARCH_SIGNALS = {
     "research", "lab", "intern", "reu", "assistant", "phd", "professor",
     "university", "graduate", "undergraduate", "faculty", "postdoc",
+    "fellowship", "scholar", "academic", "thesis", "grant", "paper",
 }
 
 
@@ -144,7 +147,11 @@ def extract_research_search_terms(
 # ---------------------------------------------------------------------------
 
 def _strip_html(text: str) -> str:
-    return re.sub(r"<[^>]+>", " ", text).strip()
+    import html as _html
+    cleaned = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = _html.unescape(cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _map_to_research_opp(
@@ -200,11 +207,11 @@ def research_basic_filter(
         url = str(raw.get("source_url") or "").strip()
         description = _strip_html(str(raw.get("description") or ""))
 
-        if not url or url in seen:
+        if not url or not url.startswith("http") or url in seen:
             continue
-        if len(description) < 50:
+        if len(description) < 50:  # noqa: PLR2004
             continue
-        if any(w in title for w in _SENIOR_WORDS) and "intern" not in title:
+        if (any(w in title for w in _SENIOR_WORDS) or bool(_LEAD_RE.search(title))) and "intern" not in title:
             continue
 
         combined = title + " " + description[:300].lower()
@@ -299,9 +306,9 @@ async def mistral_filter_research(
 
         except Exception as exc:  # noqa: BLE001
             logger.warning("mistral_filter batch %d failed (%s) — keyword fallback", i, exc)
-            _kw = {"research", "reu", "intern", "lab", "phd", "faculty", "assistant"}
             for raw, area in batch:
-                if any(w in str(raw.get("title") or "").lower() for w in _kw):
+                combined = (str(raw.get("title") or "") + " " + str(raw.get("description") or "")[:150]).lower()
+                if any(w in combined for w in _RESEARCH_SIGNALS):
                     kept.append((raw, area))
 
     return kept

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -27,12 +28,12 @@ def build_dedup_key(company: str, title: str, location: str | None) -> str:
         _NON_ALNUM.sub("", title.lower()),
         _NON_ALNUM.sub("", (location or "").lower()),
     ])
-    return hashlib.sha256(parts.encode()).hexdigest()[:16]
+    return hashlib.sha256(parts.encode()).hexdigest()[:24]
 
 
 def detect_work_mode(text: str) -> str:
     lower = text.lower()
-    has_remote = "remote" in lower
+    has_remote = "remote" in lower or "distributed team" in lower or "work from anywhere" in lower
     has_hybrid = "hybrid" in lower
     has_onsite = any(w in lower for w in ("on-site", "onsite", "in-person", "in office", "in-office"))
     if has_remote and (has_hybrid or has_onsite):
@@ -75,9 +76,11 @@ def extract_stipend(text: str) -> int | None:
         val = float(raw)
         if m.group(2):          # "k" or ",000" suffix
             val *= 1000
-        if "/hr" in text[m.start():m.end() + 8].lower() or "hour" in text[m.start():m.end() + 8].lower():
-            val = val * 160     # rough 160 hr/month
-        if 200 <= val <= 15000:  # noqa: PLR2004 — sane monthly USD range
+        # Check if hourly rate within the matched + surrounding text
+        window = text[max(0, m.start() - 4):m.end() + 12].lower()
+        if "/hr" in window or "hourly" in window or "per hour" in window:
+            val = val * 160     # 160 hr/month
+        if 200 <= val <= 20_000:  # noqa: PLR2004 — sane monthly USD range
             return int(val)
 
     # Check INR
@@ -99,7 +102,7 @@ def extract_stipend(text: str) -> int | None:
 def extract_requirements(description: str) -> list[str]:
     # Find a requirements/qualifications section
     pattern = re.compile(
-        r"(?:Requirements?|Qualifications?|What you.ll need|You.ll need|Must.have)[:\s]*\n"
+        r"(?:Requirements?|Qualifications?|What you[''']ll need|You[''']ll need|Must[ -]have)[:\s]*\n"
         r"((?:.+\n?)+?)(?:\n\n|\Z)",
         re.IGNORECASE,
     )
@@ -109,6 +112,14 @@ def extract_requirements(description: str) -> list[str]:
     block = m.group(1)
     bullets = re.split(r"\n[•\-\*]\s*|\n\d+\.\s*|\n", block)
     return [b.strip() for b in bullets if 10 < len(b.strip()) < 300][:10]
+
+
+def strip_html(text: str) -> str:
+    """Remove HTML tags and decode entities."""
+    cleaned = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = html.unescape(cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _parse_date(s: str | None) -> datetime | None:

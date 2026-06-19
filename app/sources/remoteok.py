@@ -32,13 +32,19 @@ class RemoteOKSource:
                 for item in data[1:]:
                     if not isinstance(item, dict):
                         continue
-                    title = str(item.get("position") or "")
-                    company = str(item.get("company") or "RemoteOK")
+                    title = str(item.get("position") or "").strip()
+                    url = str(item.get("url") or "").strip()
+                    if not title or not url:
+                        continue
+                    company = str(item.get("company") or "")
                     description = str(item.get("description") or "")
-                    url = str(item.get("url") or "")
                     posted_at = str(item.get("date") or "") or None
                     salary_min = item.get("salary_min")
-                    stipend: int | None = int(salary_min) if isinstance(salary_min, int | float) else None
+                    # RemoteOK salary_min is annual USD — convert to monthly
+                    stipend: int | None = None
+                    if isinstance(salary_min, int | float) and salary_min > 0:
+                        monthly = int(salary_min / 12)
+                        stipend = monthly if 200 <= monthly <= 20_000 else None
                     results.append({
                         "title": title,
                         "company_name": company,

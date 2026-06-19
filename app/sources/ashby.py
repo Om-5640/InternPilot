@@ -21,9 +21,11 @@ def _parse_job(job: dict[str, object], slug: str) -> RawPosting:
         if isinstance(components, list) and components:
             first = components[0]
             if isinstance(first, dict):
-                val = first.get("maxValue") or first.get("minValue")
-                if isinstance(val, int | float):
-                    stipend = int(val)
+                val = first.get("minValue") or first.get("maxValue")
+                if isinstance(val, int | float) and val > 0:
+                    # Ashby compensation is typically annual — convert to monthly
+                    monthly = int(val / 12)
+                    stipend = monthly if 200 <= monthly <= 20_000 else None
     return {
         "title": str(job.get("title") or ""),
         "company_name": slug,

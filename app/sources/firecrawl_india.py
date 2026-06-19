@@ -122,27 +122,26 @@ def _normalise_india_location(raw: str) -> tuple[str, str]:
 
 
 def _parse_inr_stipend(raw: str) -> int | None:
-    """Parse '₹15,000/month', 'Rs. 10000 per month', etc. → USD (approx)."""
+    """Parse '₹15,000/month', 'Rs. 10000 per month', '15k INR', etc. → USD (approx)."""
     clean = raw.lower().replace(",", "").replace("₹", "rs ")
-    # Match INR amounts
+    # Match INR amounts; capture optional k suffix explicitly
     m = re.search(
-        r"(?:rs\.?\s*|inr\s*|rupees?\s*)(\d+(?:\.\d+)?)\s*(?:k\b)?",
+        r"(?:rs\.?\s*|inr\s*|rupees?\s*)(\d+(?:\.\d+)?)\s*(k)?\b",
         clean,
     )
     if not m:
-        # Also try bare numbers preceded by ₹ in the original
-        m = re.search(r"(\d{4,6})", clean)
+        # Also try bare numbers followed by optional k (at least 4 digits to avoid false matches)
+        m = re.search(r"(\d{4,6})\s*(k)?(?:\s*/\s*(?:month|mo))?", clean)
     if not m:
         return None
-    val = float(m.group(1).replace(",", ""))
-    if "k" in clean[m.start():m.end() + 2]:
+    val = float(m.group(1))
+    if m.group(2) and m.group(2).lower() == "k":
         val *= 1000
-    # If the value looks like INR (>=1000), convert to USD
-    if val >= 500:  # noqa: PLR2004
+    if val >= 500:  # noqa: PLR2004 — looks like INR
         usd = round(val / _INR_USD)
         return usd if usd > 0 else None
-    # Small numbers might already be USD
-    return int(val) if val > 0 else None
+    # Small numbers: treat as USD only if explicitly tagged (avoid returning wrong currency)
+    return None
 
 
 # ---------------------------------------------------------------------------
