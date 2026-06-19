@@ -1,6 +1,6 @@
-"""Local embedding service using sentence-transformers (free, no API calls).
+"""Embedding service using fastembed (ONNX Runtime — no PyTorch, ~80 MB RAM).
 
-Model: all-MiniLM-L6-v2
+Model: all-MiniLM-L6-v2  (same model, same 384-dim output as before)
 Dimension: 384 — import EMBEDDING_DIM wherever you need the pgvector column size.
 
 Usage:
@@ -12,20 +12,15 @@ from __future__ import annotations
 
 import asyncio
 from functools import lru_cache
-from typing import TYPE_CHECKING, cast
 
-if TYPE_CHECKING:
-    from sentence_transformers import SentenceTransformer as SentenceTransformerT
-
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 
 
 @lru_cache(maxsize=1)
-def _get_model() -> SentenceTransformerT:
-    from sentence_transformers import SentenceTransformer
-
-    return cast("SentenceTransformerT", SentenceTransformer(EMBEDDING_MODEL))
+def _get_model() -> object:
+    from fastembed import TextEmbedding
+    return TextEmbedding(model_name=EMBEDDING_MODEL)
 
 
 async def embed(texts: list[str]) -> list[list[float]]:
@@ -34,9 +29,8 @@ async def embed(texts: list[str]) -> list[list[float]]:
         return []
     loop = asyncio.get_event_loop()
     model = _get_model()
-    # encode() is CPU-bound → run in thread pool so the event loop is not blocked
     result: list[list[float]] = await loop.run_in_executor(
         None,
-        lambda: model.encode(texts, show_progress_bar=False).tolist(),
+        lambda: [v.tolist() for v in model.embed(texts)],  # type: ignore[attr-defined]
     )
     return result
