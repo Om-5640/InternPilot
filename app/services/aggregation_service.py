@@ -25,6 +25,7 @@ from app.schemas.posting import PostingSchema, coerce_posting_schema
 from app.sources.adzuna import AdzunaSource
 from app.sources.ashby import AshbySource
 from app.sources.base import RawPosting, Source
+from app.sources.firecrawl_india import IndiaFirecrawlSource
 from app.sources.greenhouse import GreenhouseSource
 from app.sources.normalize import normalize, normalize_company_name
 from app.sources.remoteok import RemoteOKSource
@@ -43,6 +44,13 @@ class AggregationService:
     # ------------------------------------------------------------------
 
     async def refresh(self) -> dict[str, int]:
+        # India source requires both Firecrawl key (for scraping) AND an LLM (for extraction).
+        # It is wired up lazily so the LLM router's cooldown logic is shared with the pipeline.
+        _india_llm_fn = None
+        if settings.FIRECRAWL_API_KEY:
+            from app.llm.router import complete as _complete
+            _india_llm_fn = _complete
+
         sources: list[Source] = [
             GreenhouseSource(),
             AshbySource(),
@@ -50,6 +58,10 @@ class AggregationService:
             RemotiveSource(),
             USAJobsSource(),   # all-field government internships (requires USAJOBS_API_KEY)
             AdzunaSource(),    # cross-industry aggregator (requires ADZUNA_APP_ID/KEY)
+            IndiaFirecrawlSource(  # Indian sites: Internshala, LetsIntern (requires FIRECRAWL_API_KEY)
+                api_key=settings.FIRECRAWL_API_KEY,
+                llm_fn=_india_llm_fn,
+            ),
         ]
 
         # Fetch all sources concurrently; a single failing source must not abort the run

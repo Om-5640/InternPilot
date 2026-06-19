@@ -158,6 +158,26 @@ def normalise_location(loc: str | None) -> str | None:
     # Partial-match: if "remote" appears anywhere treat as Remote
     if re.search(r"\bremote\b", loc, re.IGNORECASE):
         return "Remote"
+    # Work From Home → Remote (common in Indian listings)
+    if re.search(r"\bwork\s*from\s*home\b|\bwfh\b", loc, re.IGNORECASE):
+        return "Remote"
+    # Indian cities — append ", India" if not already present
+    _india_cities = {
+        "Bangalore", "Bengaluru", "Mumbai", "Delhi", "New Delhi",
+        "Hyderabad", "Pune", "Chennai", "Kolkata", "Ahmedabad",
+        "Gurgaon", "Gurugram", "Noida", "Jaipur", "Chandigarh",
+        "Lucknow", "Indore", "Kochi", "Coimbatore", "Surat",
+        "Nagpur", "Bhopal", "Visakhapatnam", "Mysore", "Vadodara",
+    }
+    for city in _india_cities:
+        if re.search(rf"\b{re.escape(city)}\b", loc, re.IGNORECASE):
+            # Normalise Bengaluru → Bangalore
+            if city.lower() == "bengaluru":
+                return "Bangalore, India"
+            if city.lower() == "gurugram":
+                return "Gurgaon, India"
+            if "india" not in loc.lower():
+                return f"{city}, India"
     return loc
 
 
@@ -230,7 +250,10 @@ _BATCH_SYSTEM = (
     '  "keywords": array of 8-15 important keywords for resume/ATS matching (tools, frameworks, '
     "domain terms — be domain-aware: for chemical engineering include HYSYS, ASPEN, thermodynamics; "
     "for finance include Excel, Bloomberg, DCF; for software include language names, frameworks),\n"
-    '  "summary": one sentence, domain-specific, describing what the intern will do day-to-day.'
+    '  "summary": one sentence, domain-specific, describing what the intern will do day-to-day,\n'
+    '  "stipend": integer or null (monthly stipend in USD; if stated in INR divide by 83 and round; '
+    "null if not mentioned — do NOT guess; only extract if explicitly stated in the text),\n"
+    '  "work_mode": string — one of "remote", "hybrid", "onsite", "any" based on the posting text.'
 )
 
 
@@ -268,10 +291,20 @@ async def llm_enrich_batch(
             idx_val = int(item.get("idx", -1))
             if idx_val < 0:
                 continue
+            # Parse stipend safely
+            raw_stipend = item.get("stipend")
+            stipend: int | None = None
+            if isinstance(raw_stipend, (int, float)) and raw_stipend > 0:
+                stipend = int(raw_stipend)
+            # Parse work_mode safely
+            raw_wm = str(item.get("work_mode") or "").lower().strip()
+            work_mode = raw_wm if raw_wm in {"remote", "hybrid", "onsite", "any"} else None
             result[idx_val] = {
                 "requirements": [str(r).strip() for r in item.get("requirements", []) if r][:8],
                 "keywords": [str(k).strip() for k in item.get("keywords", []) if k][:15],
                 "summary": str(item.get("summary", "")).strip(),
+                "stipend": stipend,
+                "work_mode": work_mode,
             }
         return result
     except Exception as exc:  # noqa: BLE001
@@ -363,11 +396,16 @@ async def run_postings_pipeline(
         import asyncio as _asyncio  # noqa: I001
 
         from app.sources.ashby import AshbySource
+        from app.sources.firecrawl_india import IndiaFirecrawlSource
         from app.sources.greenhouse import GreenhouseSource
         from app.sources.remoteok import RemoteOKSource
         from app.sources.remotive import RemotiveSource
 
-        sources = [GreenhouseSource(), AshbySource(), RemoteOKSource(), RemotiveSource()]
+        india_llm = (lambda msgs: _llm_with_cooldown(msgs)) if settings.FIRECRAWL_API_KEY else None  # type: ignore[assignment]
+        sources = [
+            GreenhouseSource(), AshbySource(), RemoteOKSource(), RemotiveSource(),
+            IndiaFirecrawlSource(api_key=settings.FIRECRAWL_API_KEY, llm_fn=india_llm),
+        ]
         raw_batches = await _asyncio.gather(*[s.fetch() for s in sources], return_exceptions=True)
         all_raws = []
         for batch in raw_batches:
@@ -488,6 +526,14 @@ async def run_postings_pipeline(
                     changed = False
                     if enrichment.get("requirements"):
                         p.requirements = enrichment["requirements"]
+                        changed = True
+                    # Backfill stipend if not already set
+                    if enrichment.get("stipend") is not None and p.stipend is None:
+                        p.stipend = enrichment["stipend"]
+                        changed = True
+                    # Backfill work_mode if currently "any" and LLM found something more specific
+                    if enrichment.get("work_mode") and p.work_mode in ("any", None):
+                        p.work_mode = enrichment["work_mode"]
                         changed = True
                     # Store keywords + summary in decode_cache for immediate ATS use
                     if enrichment.get("keywords") or enrichment.get("summary"):

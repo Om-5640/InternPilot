@@ -266,7 +266,9 @@ function MatchCard({ m }: { m: Match }) {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <GhostBadge isGhost={m.is_ghost} score={m.ghost_score} />
           <Pill><MapPin className="h-3 w-3 mr-1" />{m.posting.location} · {m.posting.work_mode}</Pill>
-          <Pill><DollarSign className="h-3 w-3 mr-1" /><span className="font-mono">{m.posting.stipend.toLocaleString()}</span>/mo</Pill>
+          {m.posting.stipend > 0 && (
+            <Pill><DollarSign className="h-3 w-3 mr-1" /><span className="font-mono">{m.posting.stipend.toLocaleString()}</span>/mo</Pill>
+          )}
           {m.matched_skills.slice(0, 3).map((s) => <Pill key={s} tone="primary">{s}</Pill>)}
           {m.missing_skills.slice(0, 1).map((s) => <Pill key={s} tone="warm">missing · {s}</Pill>)}
         </div>

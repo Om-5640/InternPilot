@@ -46,6 +46,56 @@ def detect_work_mode(text: str) -> str:
     return "any"
 
 
+_INR_USD = 83.0
+
+# Matches: $2,000/month  $2k/month  $25/hr
+_USD_PAY_RE = re.compile(
+    r"\$\s*(\d{1,4}(?:,\d{3})*|\d+)\s*(k|,000)?\s*"
+    r"(?:per month|/month|/mo|pm\b|p\.m\.|per hour|/hr|/hour|hourly)?",
+    re.IGNORECASE,
+)
+# Matches: ₹15,000/month  Rs 10000/month  INR 12000 per month  15000 INR/month
+_INR_PAY_RE = re.compile(
+    r"(?:₹|rs\.?\s+|inr\s+|rupees?\s+)(\d{1,3}(?:,\d{3})*|\d+)\s*(k|,000)?\b"
+    r"|(\d{1,3}(?:,\d{3})*|\d+)\s*(k)?\s*(?:inr|rupees?)(?:\s*/\s*month)?",
+    re.IGNORECASE,
+)
+
+
+def extract_stipend(text: str) -> int | None:
+    """
+    Extract monthly stipend from job description text.
+    Returns USD integer or None.
+    Converts INR → USD at approx 83:1.
+    """
+    # Check USD first
+    m = _USD_PAY_RE.search(text)
+    if m:
+        raw = m.group(1).replace(",", "")
+        val = float(raw)
+        if m.group(2):          # "k" or ",000" suffix
+            val *= 1000
+        if "/hr" in text[m.start():m.end() + 8].lower() or "hour" in text[m.start():m.end() + 8].lower():
+            val = val * 160     # rough 160 hr/month
+        if 200 <= val <= 15000:  # noqa: PLR2004 — sane monthly USD range
+            return int(val)
+
+    # Check INR
+    m = _INR_PAY_RE.search(text)
+    if m:
+        raw = (m.group(1) or m.group(3) or "0").replace(",", "")
+        val = float(raw)
+        suffix = m.group(2) or m.group(4) or ""
+        if suffix and suffix.lower() in ("k", ",000"):
+            val *= 1000
+        if val >= 1000:  # noqa: PLR2004 — looks like INR
+            usd = round(val / _INR_USD)
+            if 10 <= usd <= 2000:  # noqa: PLR2004 — sane range after conversion
+                return usd
+
+    return None
+
+
 def extract_requirements(description: str) -> list[str]:
     # Find a requirements/qualifications section
     pattern = re.compile(
@@ -84,13 +134,18 @@ def normalize(raw: RawPosting) -> dict[str, Any]:
 
     dedup_key = build_dedup_key(raw["company_name"], title, location)
 
+    # Prefer source-provided stipend; fall back to heuristic extraction from description
+    stipend = raw.get("stipend")
+    if stipend is None and description:
+        stipend = extract_stipend(description)
+
     return {
         "title": title,
         "description": description,
         "requirements": requirements,
         "location": location,
         "work_mode": work_mode,
-        "stipend": raw.get("stipend"),
+        "stipend": stipend,
         "source": raw["source"],
         "source_url": raw["source_url"],
         "posted_at": _parse_date(raw.get("posted_at")),

@@ -162,10 +162,17 @@ function Referrals() {
         </div>
 
         <div className="mt-10">
-          {loading && <LoadingState label={isCandidateMode ? "Finding contacts" : "Finding alumni"} />}
+          {loading && <LoadingState label={isCandidateMode ? "Searching LinkedIn for contacts…" : "Finding alumni"} />}
           {error && <ErrorState error={error} onRetry={reload} />}
           {!loading && !error && contacts.length === 0 && (
-            <EmptyState title="No referral paths yet." body="As you save more roles, we'll surface alumni and 2nd-degree contacts at those companies." />
+            <EmptyState
+              title={isCandidateMode ? "No contacts found" : "No referral paths yet."}
+              body={
+                isCandidateMode
+                  ? "We checked LinkedIn but couldn't find any public contacts at this company. Try a different company or ask your university career center."
+                  : "As you save more roles, we'll surface alumni and 2nd-degree contacts at those companies."
+              }
+            />
           )}
           {!loading && !error && contacts.length > 0 && (
             <div className="grid gap-6 md:grid-cols-[1fr_1.4fr]">

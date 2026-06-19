@@ -202,13 +202,34 @@ class ReferralService(BaseService):
             )
         ).all()
 
+        # If Contact table is empty for this company, try scraping LinkedIn / team pages
+        if not rows:
+            company = await self.db.get(Company, resolved_company_id)
+            if company is not None:
+                try:
+                    from app.services.contact_scraper import discover_contacts
+                    discovered = await discover_contacts(
+                        resolved_company_id, company.name, self.db
+                    )
+                    if discovered:
+                        # Re-query now that we've added contacts
+                        rows = (
+                            await self.db.execute(
+                                select(Contact, Company)
+                                .join(Company, Contact.company_id == Company.id)
+                                .where(Contact.company_id == resolved_company_id)
+                            )
+                        ).all()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("contact_scraper failed for company_id=%s: %s", resolved_company_id, exc)
+
         if not rows:
             return []
 
         contacts = [r[0] for r in rows]
         company_name = rows[0][1].name
 
-        # Use the student's own canonical university to boost same-alumni contacts in ranking
+        # Rank: same-university alumni first, then by relationship type, then recency
         profile = await self._get_profile()
         student_canonical = profile.university_canonical if profile else None
 
