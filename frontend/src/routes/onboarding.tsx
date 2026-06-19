@@ -579,44 +579,49 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
         </div>
       </div>
 
-      {/* Sidebar */}
-      <aside className="card-soft p-6 h-fit md:sticky md:top-24 md:max-h-[calc(100vh-7rem)] md:overflow-y-auto space-y-6">
+      {/* Sidebar — fixed-width right column, no sticky, no scroll */}
+      <aside className="card-soft p-5 h-fit space-y-5">
+        {/* Profile strength ring */}
         <div>
           <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">Profile strength</div>
           <StrengthMeter value={profile.profile_strength} />
         </div>
 
-        {/* What AI extracted — show as a quick snapshot */}
-        <div className="rounded-xl p-4 space-y-2.5" style={{ background: "var(--color-surface)" }}>
-          <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">What we know about you</div>
+        {/* Quick snapshot */}
+        <div className="rounded-xl p-3 space-y-2" style={{ background: "var(--color-surface)" }}>
+          <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground mb-1">What we know</div>
           <ProfileStat label="Skills" count={profile.skills.length} good={profile.skills.length >= 5} hint="upload résumé" />
-          <ProfileStat label="Work experience" count={profile.experience.length} good={profile.experience.length >= 1} hint="upload résumé" />
+          <ProfileStat label="Experience" count={profile.experience.length} good={profile.experience.length >= 1} hint="upload résumé" />
           <ProfileStat label="Education" count={profile.education.length} good={profile.education.length >= 1} hint="upload résumé" />
           <ProfileStat label="Projects" count={profile.projects.length} good={profile.projects.length >= 2} hint="connect GitHub" />
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">GitHub</span>
             {profile.github_url
               ? <span className="font-medium" style={{ color: "var(--color-primary)" }}>Connected</span>
-              : <span className="text-muted-foreground italic">not connected</span>}
+              : <span className="text-muted-foreground italic">not set</span>}
           </div>
         </div>
 
+        {/* Top skills — cap at 8 so pills never wrap past 2 rows */}
         {profile.skills.length > 0 && (
           <div>
-            <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground mb-2">Top skills</div>
-            <div className="flex flex-wrap gap-1.5">
-              {profile.skills.slice(0, 12).map((s) => <Pill key={s}>{s}</Pill>)}
-              {profile.skills.length > 12 && <span className="text-xs text-muted-foreground self-center">+{profile.skills.length - 12} more</span>}
+            <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground mb-1.5">Top skills</div>
+            <div className="flex flex-wrap gap-1">
+              {profile.skills.slice(0, 8).map((s) => <Pill key={s}>{s}</Pill>)}
+              {profile.skills.length > 8 && (
+                <span className="text-xs text-muted-foreground self-center">+{profile.skills.length - 8}</span>
+              )}
             </div>
           </div>
         )}
 
+        {/* Improvement gaps — 3 items keeps the sidebar height predictable */}
         <div>
-          <div className="text-sm font-medium flex items-center gap-2">
-            <Sparkles className="h-4 w-4" style={{ color: "var(--color-primary)" }} /> Always room to grow
+          <div className="text-xs font-medium flex items-center gap-1.5 mb-2" style={{ color: "var(--color-primary)" }}>
+            <Sparkles className="h-3.5 w-3.5" /> Always room to grow
           </div>
-          <ul className="mt-3 space-y-2.5 text-sm">
-            {(profile.gaps.length > 0 ? profile.gaps : ALWAYS_USEFUL_GAPS).map((g, i) => (
+          <ul className="space-y-1.5">
+            {(profile.gaps.length > 0 ? profile.gaps : ALWAYS_USEFUL_GAPS).slice(0, 3).map((g, i) => (
               <GapItem key={g} gap={g} index={i} />
             ))}
           </ul>
@@ -624,7 +629,7 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
 
         <Link
           to="/feed"
-          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground hover:bg-[color:var(--primary-hover)]"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-[color:var(--primary-hover)]"
         >
           See my match feed <ArrowRight className="h-4 w-4" />
         </Link>
@@ -694,28 +699,26 @@ function ProfileStat({ label, count, good, hint }: { label: string; count: numbe
 
 function GapItem({ gap, index }: { gap: string; index: number }) {
   const [expanded, setExpanded] = useState(false);
-
-  // Generate context-specific guidance for each gap
   const guidance = getGapGuidance(gap);
 
   return (
-    <li className="rounded-lg border p-3" style={{ borderColor: "var(--color-hairline)" }}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex gap-2.5 items-start">
-          <span className="mt-0.5 font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
-          <span className="text-muted-foreground text-sm">{gap}</span>
+    <li className="rounded-lg border px-2.5 py-2" style={{ borderColor: "var(--color-hairline)" }}>
+      <div className="flex items-start justify-between gap-1.5">
+        <div className="flex gap-2 items-start min-w-0">
+          <span className="shrink-0 mt-0.5 font-mono text-[10px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+          <span className="text-muted-foreground text-xs leading-snug">{gap}</span>
         </div>
         {guidance && (
           <button
             onClick={() => setExpanded((o) => !o)}
-            className="shrink-0 text-xs text-muted-foreground hover:text-foreground underline flex items-center gap-0.5"
+            className="shrink-0 text-[10px] text-muted-foreground hover:text-foreground underline flex items-center gap-0.5 mt-0.5"
           >
-            {expanded ? <>Less <ChevronUp className="h-3 w-3" /></> : <>Know more <ChevronDown className="h-3 w-3" /></>}
+            {expanded ? <>less <ChevronUp className="h-2.5 w-2.5" /></> : <>more <ChevronDown className="h-2.5 w-2.5" /></>}
           </button>
         )}
       </div>
       {expanded && guidance && (
-        <div className="mt-3 rounded-lg p-3 text-xs text-muted-foreground leading-relaxed" style={{ background: "var(--color-surface)" }}>
+        <div className="mt-2 rounded p-2 text-[10px] text-muted-foreground leading-relaxed" style={{ background: "var(--color-surface)" }}>
           {guidance}
         </div>
       )}
@@ -752,19 +755,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function StrengthMeter({ value }: { value: number }) {
-  const size = 180, r = 78, c = 2 * Math.PI * r;
+  const size = 140, r = 58, c = 2 * Math.PI * r;
   return (
-    <div className="relative mt-4 grid place-items-center" style={{ width: size, height: size }}>
+    <div className="relative mt-3 grid place-items-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-label="Profile strength">
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--color-hairline)" strokeWidth="10" fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--color-hairline)" strokeWidth="9" fill="none" />
         <circle cx={size / 2} cy={size / 2} r={r}
-                stroke="var(--color-primary)" strokeWidth="10" fill="none" strokeLinecap="round"
+                stroke="var(--color-primary)" strokeWidth="9" fill="none" strokeLinecap="round"
                 strokeDasharray={c} strokeDashoffset={c - (c * value) / 100} />
       </svg>
       <div className="absolute inset-0 grid place-items-center">
         <div className="text-center">
-          <div className="font-display text-5xl font-medium">{value}</div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-1">/ 100</div>
+          <div className="font-display text-4xl font-medium">{value}</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">/ 100</div>
         </div>
       </div>
     </div>
