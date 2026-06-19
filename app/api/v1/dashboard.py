@@ -21,7 +21,7 @@ async def get_dashboard(
     return await DashboardService(db, current_user.id).get_summary()
 
 
-@router.get("/digest", response_model=DigestResponse)
+@router.get("/dashboard/digest", response_model=DigestResponse)
 async def get_digest(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import (  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
+from app.llm.embeddings import embed  # noqa: E402
 from app.models.application import Application  # noqa: E402
 from app.models.artifact import Artifact  # noqa: E402
 from app.models.company import Company  # noqa: E402
@@ -779,6 +780,15 @@ async def _get_or_create_posting(
         dedup_key=dedup_key,
         source_sightings=sightings,
     )
+    # Compute embedding so matching service can score this posting
+    embed_text = f"{p.title} at {company.name}. {p.description[:800]}"
+    try:
+        vectors = await embed([embed_text])
+        if vectors:
+            p.embedding = vectors[0]
+    except Exception:  # noqa: BLE001
+        pass  # seeding continues without embedding; posting won't appear in ranked feed
+
     session.add(p)
     await session.flush()
     return p

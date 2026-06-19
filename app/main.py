@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.v1 import admin as admin_router
 from app.api.v1 import applications as applications_router
 from app.api.v1 import auth as auth_router
 from app.api.v1 import dashboard as dashboard_router
@@ -127,3 +128,4 @@ app.include_router(evaluation_router.router, prefix="/api")
 app.include_router(dashboard_router.router, prefix="/api")
 app.include_router(notifications_router.router, prefix="/api")
 app.include_router(research_router.router, prefix="/api")
+app.include_router(admin_router.router, prefix="/api")

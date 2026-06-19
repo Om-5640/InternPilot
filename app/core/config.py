@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Register free at https://firecrawl.dev — 500 scrapes/month on free tier
     FIRECRAWL_API_KEY: str = ""  # us | gb | de | au | in | ca
 
+    # Admin seed token — set this on Render to enable POST /api/admin/seed
+    ADMIN_SEED_TOKEN: str = ""
+
     # CORS — comma-separated string in env, parsed to list
     CORS_ORIGINS: str = "http://localhost:3000"
 

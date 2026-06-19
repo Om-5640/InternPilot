@@ -57,6 +57,14 @@ function Onboarding() {
   );
 }
 
+const ALWAYS_USEFUL_GAPS = [
+  "Add quantified outcomes to your experience — numbers (%, $, ×) make recruiters stop scrolling",
+  "List 2–3 tools or frameworks you're actively learning right now — shows intellectual momentum",
+  "Add links to live demos or deployed projects — recruiters spend ~6 seconds per profile",
+  "Expand your research interests so the Research feed surfaces relevant lab opportunities",
+  "Set target companies in Preferences — the match feed weights companies you've named higher",
+];
+
 function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
   const navigate = useNavigate();
   const guest = isGuestMode();
@@ -77,12 +85,12 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Resume state
+  // Resume state — persist across page loads: if experience or education was parsed, consider done
+  const hasResumeData = initialProfile.experience.length > 0 || initialProfile.education.length > 0;
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeUploading, setResumeUploading] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  const [resumeDone, setResumeDone] = useState(false);
-  const [extractedSummary, setExtractedSummary] = useState<string | null>(null);
+  const [resumeDone, setResumeDone] = useState(hasResumeData);
 
   // GitHub state
   const [githubConnecting, setGithubConnecting] = useState(false);
@@ -355,17 +363,39 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
           {githubDone ? (
             <div className="mt-5 space-y-4">
               <div className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-primary)" }}>
-                <Check className="h-4 w-4" /> GitHub connected — {githubUrl || profile.github_url}
+                <Check className="h-4 w-4" /> GitHub connected —{" "}
+                <a href={githubUrl || profile.github_url} target="_blank" rel="noreferrer"
+                   className="underline text-sm" style={{ color: "var(--color-primary)" }}>
+                  {githubUrl || profile.github_url}
+                </a>
               </div>
-              {profile.skills.length > 0 && (
-                <div className="rounded-xl border p-4" style={{ borderColor: "var(--color-hairline)" }}>
-                  <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground mb-2">Languages detected from repos</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {profile.skills.slice(0, 15).map((s) => <Pill key={s}>{s}</Pill>)}
-                    {profile.skills.length > 15 && <span className="text-xs text-muted-foreground self-center">+{profile.skills.length - 15} more</span>}
+
+              {profile.projects.length > 0 && (
+                <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: "var(--color-hairline)" }}>
+                  <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
+                    Projects fetched from GitHub ({profile.projects.length})
                   </div>
+                  {profile.projects.map((p) => (
+                    <div key={p.name} className="rounded-lg border bg-white p-3" style={{ borderColor: "var(--color-hairline)" }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-medium text-sm">
+                          {p.url
+                            ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:underline">{p.name}</a>
+                            : p.name}
+                        </div>
+                        <div className="flex flex-wrap gap-1 shrink-0">
+                          {p.tech.slice(0, 3).map((t) => <Pill key={t}>{t}</Pill>)}
+                          {p.tech.length > 3 && <span className="text-xs text-muted-foreground self-center">+{p.tech.length - 3}</span>}
+                        </div>
+                      </div>
+                      {p.description && (
+                        <p className="mt-1.5 text-xs text-muted-foreground leading-relaxed">{p.description}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
+
               <button
                 onClick={() => setGithubDone(false)}
                 className="text-xs text-muted-foreground underline"
@@ -394,21 +424,6 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
             </div>
           )}
           {githubError && <p className="mt-2 text-xs" style={{ color: "var(--color-reject)" }}>{githubError}</p>}
-          {profile.projects.length > 0 && (
-            <div className="mt-5 grid gap-3">
-              {profile.projects.map((p) => (
-                <div key={p.name} className="flex items-center justify-between rounded-lg border bg-surface px-4 py-3" style={{ borderColor: "var(--color-hairline)" }}>
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm">
-                      {p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="hover:underline">{p.name}</a> : p.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">{p.description}</div>
-                  </div>
-                  <div className="flex gap-1.5 shrink-0">{p.tech.map((s) => <Pill key={s}>{s}</Pill>)}</div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* About you */}
@@ -565,7 +580,7 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
       </div>
 
       {/* Sidebar */}
-      <aside className="card-soft p-8 h-fit sticky top-24 space-y-6">
+      <aside className="card-soft p-6 h-fit md:sticky md:top-24 md:max-h-[calc(100vh-7rem)] md:overflow-y-auto space-y-6">
         <div>
           <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground font-mono">Profile strength</div>
           <StrengthMeter value={profile.profile_strength} />
@@ -596,18 +611,16 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
           </div>
         )}
 
-        {profile.gaps.length > 0 && (
-          <div>
-            <div className="text-sm font-medium flex items-center gap-2">
-              <Sparkles className="h-4 w-4" style={{ color: "var(--color-primary)" }} /> Know your gaps
-            </div>
-            <ul className="mt-3 space-y-2.5 text-sm">
-              {profile.gaps.map((g, i) => (
-                <GapItem key={g} gap={g} index={i} />
-              ))}
-            </ul>
+        <div>
+          <div className="text-sm font-medium flex items-center gap-2">
+            <Sparkles className="h-4 w-4" style={{ color: "var(--color-primary)" }} /> Always room to grow
           </div>
-        )}
+          <ul className="mt-3 space-y-2.5 text-sm">
+            {(profile.gaps.length > 0 ? profile.gaps : ALWAYS_USEFUL_GAPS).map((g, i) => (
+              <GapItem key={g} gap={g} index={i} />
+            ))}
+          </ul>
+        </div>
 
         <Link
           to="/feed"
