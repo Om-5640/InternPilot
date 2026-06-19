@@ -12,7 +12,9 @@ import asyncio
 import os
 import pathlib
 import subprocess
+from unittest.mock import AsyncMock, patch
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -47,6 +49,36 @@ TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
     "postgresql+asyncpg://postgres:testpass@localhost:5433/internpilot_test",
 )
+
+# ---------------------------------------------------------------------------
+# Silence external HTTP sources — prevent real Firecrawl / USAJobs / Adzuna
+# calls from firing during tests. Every test that exercises refresh() already
+# mocks the sources it cares about; the rest must return [] by default.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _mock_external_sources():
+    """Return empty lists from sources that make real HTTP calls.
+
+    Tests that specifically want to exercise one of these sources override
+    the mock themselves (the last patch wins, so per-test mocks still work).
+    """
+    with (
+        patch(
+            "app.sources.firecrawl_india.IndiaFirecrawlSource.fetch",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.sources.usajobs.USAJobsSource.fetch",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.sources.adzuna.AdzunaSource.fetch",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        yield
+
 
 # ---------------------------------------------------------------------------
 # Session-scoped engine: run Alembic migrations once per test run
