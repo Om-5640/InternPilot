@@ -802,13 +802,13 @@ export const api = {
   },
 
   // ---------- Research ----------
-  async getResearchOpportunities(): Promise<ResearchOpportunity[]> {
+  async getResearchOpportunities(): Promise<{ items: ResearchOpportunity[]; fetching: boolean }> {
     if (!shouldUseMocks()) {
       const raw = await http<any>("/research/opportunities");
       const items: any[] = raw?.data ?? (Array.isArray(raw) ? raw : []);
-      return items.map(mapResearchOpportunity);
+      return { items: items.map(mapResearchOpportunity), fetching: raw?.fetching ?? false };
     }
-    await delay(); return researchOpportunities;
+    await delay(); return { items: researchOpportunities, fetching: false };
   },
   async getResearchOpportunity(id: string): Promise<ResearchOpportunity | undefined> {
     if (!shouldUseMocks()) {

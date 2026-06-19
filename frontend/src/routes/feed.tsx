@@ -241,7 +241,14 @@ function CompanyFeed() {
 
 function ResearchFeed() {
   const { data, loading, error, reload } = useApi(() => api.getResearchOpportunities(), []);
-  const list = (data ?? []).slice().sort((a, b) => b.fit_score - a.fit_score);
+  const fetching = data?.fetching ?? false;
+  const list = (data?.items ?? []).slice().sort((a, b) => b.fit_score - a.fit_score);
+
+  useEffect(() => {
+    if (!fetching) return;
+    const t = setTimeout(reload, 45_000);
+    return () => clearTimeout(t);
+  }, [fetching, reload]);
 
   return (
     <section>
@@ -249,10 +256,25 @@ function ResearchFeed() {
         {list.length} labs · ranked by fit
       </div>
 
+      {!loading && fetching && (
+        <div className="mt-4 flex items-center gap-3 rounded-xl border p-4"
+             style={{ borderColor: "color-mix(in oklab, var(--color-primary) 35%, transparent)", background: "color-mix(in oklab, var(--color-primary) 6%, white)" }}>
+          <FlaskConical className="h-5 w-5 shrink-0 animate-pulse" style={{ color: "var(--color-primary)" }} />
+          <div>
+            <div className="font-medium text-sm" style={{ color: "var(--color-primary)" }}>
+              Fetching live research internships for your interests...
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Searching across platforms and filtering with AI. Fresh opportunities will appear in ~60 seconds.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 grid gap-5">
         {loading && <LoadingState label="Matching to labs" />}
         {error && <ErrorState error={error} onRetry={reload} />}
-        {!loading && !error && list.length === 0 && (
+        {!loading && !error && list.length === 0 && !fetching && (
           <EmptyState icon={FlaskConical} title="No research matches yet." body="Add research interests in onboarding to seed this feed." />
         )}
         {list.map((o, i) => (

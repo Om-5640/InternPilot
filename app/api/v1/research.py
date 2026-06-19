@@ -1,6 +1,7 @@
 """Module 12 — Research Internships endpoints."""
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, Query
@@ -16,6 +17,12 @@ from app.schemas.research import (
     ResearchMatchSchema,
     ResearchOutreachSchema,
     UpdateOutreachRequest,
+)
+from app.services.profile_service import ProfileService
+from app.services.research_aggregation_service import (
+    ResearchAggregationService,
+    make_research_fingerprint,
+    refresh_research_background,
 )
 from app.services.research_service import ResearchService
 
@@ -34,9 +41,31 @@ async def list_research_opportunities(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, object]:
+    # ── Live research refresh (same TTL-cache pattern as /matches) ───────────
+    fetching = False
+    try:
+        profile = await ProfileService(db, current_user.id).get_or_create()
+        if profile and profile.research_interests:
+            fp = make_research_fingerprint(profile.skills, profile.research_interests)
+            if await ResearchAggregationService(db).is_stale(fp):
+                asyncio.create_task(
+                    refresh_research_background(
+                        fp, profile.skills, profile.research_interests
+                    )
+                )
+                fetching = True
+    except Exception:  # noqa: BLE001
+        pass
+
     svc = ResearchService(db, current_user.id)
     matches, total = await svc.find_matches(page=page, limit=limit)
-    return {"data": [m.model_dump() for m in matches], "page": page, "limit": limit, "total": total}
+    return {
+        "data": [m.model_dump() for m in matches],
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "fetching": fetching,
+    }
 
 
 # ---------------------------------------------------------------------------
