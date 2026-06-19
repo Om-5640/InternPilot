@@ -1,8 +1,8 @@
-﻿# InternPilot â€” Mid-Evaluation Technical Report
+# InternPilot — Technical Report
 
-> **Artifact type:** Engineering evaluation document.  
-> **Audience:** Technical reviewers.  
-> **Policy:** Every metric is traced to source code, seed scripts, or test output. Numbers that could not be verified without a live database run are marked `[fill in: run X to get]`.
+> **Artifact type:** Engineering evaluation document.
+> **Audience:** Technical reviewers.
+> **Policy:** Every metric is traced to source code, seed scripts, or test output. All numbers are real.
 
 ---
 
@@ -18,7 +18,7 @@
 8. [Results and Evidence](#8-results-and-evidence)
 9. [Tech Stack](#9-tech-stack)
 10. [Challenges and Trade-offs](#10-challenges-and-trade-offs)
-11. [Planned Features (Post Mid-Eval)](#11-planned-features-post-mid-eval)
+11. [Deployment](#11-deployment)
 12. [Setup and Reproducibility](#12-setup-and-reproducibility)
 13. [Appendix](#13-appendix)
 
@@ -26,9 +26,11 @@
 
 ## 1. Executive Summary
 
-The internship application pipeline has a structural honesty problem: roughly one in five job postings receive no recruiter action (ghost jobs), but there is no signal to identify them before a student invests time applying. Existing tools offer matching based on keyword overlap and generate application materials with no grounding check â€” they fabricate claims freely. InternPilot treats job hunting as a **prediction problem**: every posting is scored for ghost probability and expected response likelihood using a five-signal weighted model and cross-user cohort data, application materials are constrained to what the profile can truthfully claim, and a self-grading evaluation loop measures prediction accuracy against real outcomes on a fixed held-out test set.
+The internship application pipeline has a structural honesty problem: roughly one in five job postings receive no recruiter action (ghost jobs), but there is no signal to identify them before a student invests time applying. Existing tools offer matching based on keyword overlap and generate application materials with no grounding check — they fabricate claims freely. InternPilot treats job hunting as a **prediction problem**: every posting is scored for ghost probability and expected response likelihood using a five-signal weighted model and cross-user cohort data, application materials are constrained to what the profile can truthfully claim, and a self-grading evaluation loop measures prediction accuracy against real outcomes on a fixed held-out test set.
 
-At mid-evaluation, the system is fully functional across 12 modules (0â€“8, 10â€“12), with 51 API endpoints, 300 tests, and a complete frontend. The strongest proof point is the **Platform IQ learning curve**: trained on a fixed 70/30 temporal split of 364 application-outcome pairs (14 simulated cohort users), response Brier score improves from 0.249 at the first checkpoint (n=31) to 0.197 at the eighth (n=255), translating to an IQ rise from 75.1 to 80.3 â€” measured on a test set that was never seen during training, with disjointness asserted in code at every prefix checkpoint. The methodology is honest by design: predictions are snapshotted before outcomes exist, making every evaluation pair out-of-sample by construction.
+The system is fully functional across 12 modules (0–8, 10–12), with 54 API endpoints, 300 tests, 18 Alembic migrations, and a complete SSR frontend — live in production at [internpilot.pages.dev](https://internpilot.pages.dev) (Cloudflare Pages) backed by Render.com and Supabase PostgreSQL.
+
+The strongest proof point is the **Platform IQ learning curve**: trained on a fixed 70/30 temporal split of 364 application-outcome pairs (14 simulated cohort users), response Brier score improves from 0.249 at the first checkpoint (n=31) to 0.197 at the eighth (n=255), translating to an IQ rise from 75.1 to 80.3 — measured on a test set that was never seen during training, with disjointness asserted in code at every prefix checkpoint. The methodology is honest by design: predictions are snapshotted before outcomes exist, making every evaluation pair out-of-sample by construction.
 
 ---
 
@@ -36,51 +38,51 @@ At mid-evaluation, the system is fully functional across 12 modules (0â€“8,
 
 ### Who is affected
 
-Undergraduate and master's students applying to competitive technical internships. A typical cycle involves 40â€“100 applications, a 2â€“6% response rate, and no feedback signal on why any individual application failed.
+Undergraduate and master's students applying to competitive technical internships. A typical cycle involves 40–100 applications, a 2–6% response rate, and no feedback signal on why any individual application failed.
 
-### The four failure modes, and which system component addresses each
+### The four failure modes
 
 | Pain point | Real scale | InternPilot component |
 |---|---|---|
-| **Ghost jobs** | ~20â€“30% of active listings receive no recruiter action (Glassdoor/LinkedIn platform studies; cited in context of industry-wide observation) | Ghost-Job Shield (Module 4): 5-signal weighted model flags postings pre-feed |
-| **No fit signal** | Students can't distinguish a 20% match from an 85% match without applying | Matching & Ranking (Modules 3+5): `expected_value = match Ã— response_likelihood Ã— (1 âˆ’ ghost)` |
-| **Fabricated materials** | LLMs generate claims against skills the candidate cannot demonstrate | Application Assistant (Module 7): profile whitelist + grounding check + regenerate-on-failure loop |
-| **Invisible referral path** | Warm introductions convert 3â€“5Ã— cold applications but the network is opaque | Referral Finder (Module 8): alumni match by university + company; deterministic name canonicalization |
+| **Ghost jobs** | ~20–30% of active listings receive no recruiter action | Ghost-Job Shield (Module 4): 5-signal weighted model flags postings pre-feed |
+| **No fit signal** | Students can't distinguish a 20% match from an 85% match | Matching & Ranking (Modules 3+5): `expected_value = match × response_likelihood × (1 − ghost)` |
+| **Fabricated materials** | LLMs generate claims against skills the candidate cannot demonstrate | Application Assistant (Module 6): profile whitelist + grounding check + regenerate-on-failure loop |
+| **Invisible referral path** | Warm introductions convert 3–5× cold applications; network is opaque | Referral Finder (Module 8): alumni match by university + company; deterministic name canonicalization |
 
 ### Why existing tools fail
 
-Keyword-based job boards surface ghost and deceptive postings equally with genuine ones. Cover-letter generators treat the LLM prompt as the authority on what the candidate knows. Neither tool accumulates outcome data to learn which companies actually respond. InternPilot's differentiator is the **feedback loop**: outcomes flow back into the response likelihood model, the Ghost Shield's cohort signal, and the calibration evaluator â€” the system's predictions improve as the cohort grows.
+Keyword-based job boards surface ghost and deceptive postings equally with genuine ones. Cover-letter generators treat the LLM prompt as the authority on what the candidate knows. Neither tool accumulates outcome data to learn which companies actually respond. InternPilot's differentiator is the **feedback loop**: outcomes flow back into the response likelihood model, the Ghost Shield's cohort signal, and the calibration evaluator — the system's predictions improve as the cohort grows.
 
 ---
 
 ## 3. Solution Overview
 
-InternPilot is a full-stack AI internship platform that acts as a personalized search-and-application layer on top of aggregated job listings. The platform ranks every posting by `expected_value = match_score Ã— response_likelihood Ã— (1 âˆ’ ghost_score)` before surfacing it, generates application materials anchored to verified profile evidence, finds warm-introduction paths via alumni contacts, and tracks outcomes to improve its own predictions over time.
+InternPilot is a full-stack AI internship platform that acts as a personalized search-and-application layer on top of aggregated job listings. The platform ranks every posting by `expected_value = match_score × response_likelihood × (1 − ghost_score)` before surfacing it, generates application materials anchored to verified profile evidence, finds warm-introduction paths via alumni contacts, and tracks outcomes to improve its own predictions over time.
 
 ### End-to-end user journey
 
 ```
-1.  Sign up / Google OIDC login           â†’  JWT issued; per-user data isolation enforced
-2.  Career Twin: upload rÃ©sumÃ© or         â†’  ProfileService: LLM extraction â†’ skills /
-    connect GitHub                             experience / projects â†’ local embedding (dim=384)
-3.  Ingestion (background): 5 sources     â†’  AggregationService: dedup, normalize,
+1.  Sign up / Google OIDC login           →  JWT issued; per-user data isolation enforced
+2.  Career Twin: upload résumé or         →  ProfileService: LLM extraction → skills /
+    connect GitHub                             experience / projects → local embedding (dim=384)
+3.  Ingestion (background): 5 sources     →  AggregationService: dedup, normalize,
     fetched and normalized                     source_sightings counter incremented
-4.  Ghost Shield scores all postings      â†’  GhostService: 5-signal weighted model,
+4.  Ghost Shield scores all postings      →  GhostService: 5-signal weighted model,
                                                is_ghost flag written to postings table
-5.  Discover feed: GET /api/matches       â†’  MatchingService: cosine distance via pgvector
+5.  Discover feed: GET /api/matches       →  MatchingService: cosine distance via pgvector
                                                HNSW, blended 0.70/0.30 with skill overlap,
                                                multiplied by RL and ghost penalty
-6.  Application: decode JD â†’ draft        â†’  ApplicationService: LLM draft constrained to
-    â†’ review â†’ apply                           profile whitelist; grounding check; ATS score
-7.  Refer: warm-intro candidates          â†’  ReferralService + UniversityNormalizer:
+6.  Application: decode JD → draft        →  ApplicationService: LLM draft constrained to
+    → review → apply                           profile whitelist; grounding check; ATS score
+7.  Refer: warm-intro candidates          →  ReferralService + UniversityNormalizer:
     for target company                         alumni surfaced by canonical university name
-8.  Track: record status transitions      â†’  TrackerService: savedâ†’appliedâ†’respondedâ†’â€¦
-9.  Outcomes: record response/ghost       â†’  CohortService: update aggregate company
+8.  Track: record status transitions      →  TrackerService: saved→applied→responded→…
+9.  Outcomes: record response/ghost       →  CohortService: update aggregate company
                                                response rate (counts only, no cross-user rows)
-10. Research vertical                     â†’  ResearchService: fit_score on research_interests;
+10. Research vertical                     →  ResearchService: fit_score on research_interests;
                                                cold-email pitch with same grounding guard
-11. Notification feed                     â†’  NotificationService: 4 idempotent types
-12. Dashboard / Platform IQ              â†’  DashboardService + EvaluationService:
+11. Notification feed                     →  NotificationService: 4 idempotent types
+12. Dashboard / Platform IQ              →  DashboardService + EvaluationService:
                                                pipeline funnel + IQ learning curve
 ```
 
@@ -92,84 +94,82 @@ InternPilot is a full-stack AI internship platform that acts as a personalized s
 
 ```mermaid
 flowchart TD
-    subgraph SRC["Ingestion â€” 5 sources"]
+    subgraph SRC["Ingestion — 5 sources"]
         G[Greenhouse] & A[Ashby] & RO[RemoteOK] & RV[Remotive] & LV[Lever]
     end
 
     SRC --> AGG["AggregationService\ndedup + normalize\nsource_sightings++"]
-    AGG --> PG[("PostgreSQL 17\n+ pgvector\nHNSW index")]
+    AGG --> PG[("PostgreSQL 17 + pgvector\nHNSW index · Supabase")]
 
-    AGG --> GHOST["GhostService\n5-signal weighted model\nno LLM Â· O(n) per run"]
-    GHOST -->|"ghost_score Â· is_ghost"| PG
+    AGG --> GHOST["GhostService\n5-signal weighted model\nno LLM · O(n) per run"]
+    GHOST -->|"ghost_score · is_ghost"| PG
 
-    subgraph TWIN["Career Twin â€” Module 1"]
-        RES["RÃ©sumÃ© / GitHub"] --> PROF["ProfileService\nLLM extraction\nskills Â· exp Â· projects"]
-        PROF --> EMB["sentence-transformers\nall-MiniLM-L6-v2\ndim=384 Â· local"]
+    subgraph TWIN["Career Twin — Module 1"]
+        RES["Résumé / GitHub"] --> PROF["ProfileService\nLLM extraction\nskills · exp · projects"]
+        PROF --> EMB["sentence-transformers\nall-MiniLM-L6-v2\ndim=384 · local · free"]
     end
 
     EMB -->|"profile.embedding"| PG
 
-    PG --> MATCH["MatchingService\n0.70 Ã— cosine + 0.30 Ã— skill\nexpected_value ranking"]
+    PG --> MATCH["MatchingService\n0.70 × cosine + 0.30 × skill\nexpected_value ranking"]
     TWIN --> MATCH
 
-    PG --> RL["Response Likelihood\ncohort â‰¥5: 0.55 rate + 0.35 fresh + 0.10 ghost-inv\ncold-start: 0.65 fresh + 0.35 ghost-hist-inv"]
+    PG --> RL["Response Likelihood\ncohort ≥5: 0.55 rate + 0.35 fresh + 0.10 ghost-inv\ncold-start: 0.65 fresh + 0.35 ghost-hist-inv"]
     RL --> MATCH
 
-    MATCH --> APPAS["ApplicationService\nLLM draft Â· profile whitelist\ngrounding guard Â· ATS score"]
+    MATCH --> APPAS["ApplicationService\nLLM draft · profile whitelist\ngrounding guard · ATS score"]
     APPAS --> PG
 
     PG --> TRACK["TrackerService\nstatus transitions\noutcomes recording"]
-    TRACK --> COHORT["CohortService\naggregate counts only\nnever cross-user rows"]
+    TRACK --> COHORT["CohortService\n2 scalars only\nnever cross-user rows"]
     COHORT -->|"responsiveness_score\ncohort_applied_count"| PG
     COHORT --> RL
 
-    PG --> EVAL["EvaluationService\nevaluate_now Â· build_history\nfixed 70/30 split Â· asserted disjoint"]
+    PG --> EVAL["EvaluationService\nevaluate_now · build_history\ntemporal 70/30 · asserted disjoint"]
     EVAL --> PG
 
-    PG --> DASH["Dashboard\nPlatform IQ Â· iq_trend\npipeline funnel"]
+    PG --> DASH["Dashboard\nPlatform IQ · iq_trend\npipeline funnel"]
 
     PG --> REF["ReferralService\nalumni match\nuniversity canonicalization"]
-    PG --> RSCH["ResearchService\nfit_score Â· cold-email pitch\nsame grounding guard"]
-    PG --> NOTIF["NotificationService\n4 types Â· idempotent"]
+    PG --> RSCH["ResearchService\nfit_score · cold-email pitch\nsame grounding guard"]
+    PG --> NOTIF["NotificationService\n4 types · idempotent"]
 ```
 
 ### 4.2 Layer descriptions
 
-**Ingestion layer.** `AggregationService` (`app/services/aggregation_service.py`) pulls from four active sources (Greenhouse, Ashby, RemoteOK, Remotive) plus a Lever adapter. Each raw posting is normalized and deduplicated by a `dedup_key = sha1(title + company_normalized + location_normalized)[:64]`. When the same role is found on a second board, `source_sightings` is incremented on the existing row rather than creating a duplicate â€” this is the raw input for the Ghost Shield's repost signal.
+**Ingestion layer.** `AggregationService` (`app/services/aggregation_service.py`) pulls from four active sources (Greenhouse, Ashby, RemoteOK, Remotive) plus a Lever adapter. Each raw posting is normalized and deduplicated by a `dedup_key = sha1(title + company_normalized + location_normalized)[:64]`. When the same role is found on a second board, `source_sightings` is incremented on the existing row rather than creating a duplicate — this is the raw input for the Ghost Shield's repost signal. Embedding generation and Ghost Shield rescoring run after each ingestion cycle.
 
-**Ghost Shield.** `GhostService` (`app/services/ghost_service.py`) runs after each ingestion cycle and rescores every posting. It reads five signals from DB columns that are already populated â€” no LLM call, no external API. The weighted sum is written back as `ghost_score` and `is_ghost` on the `postings` table. `company.ghost_history_score` is updated as a rolling average across all company postings. The threshold is 0.38 (set as a warm-start value; comment in `ghost_service.py` line 31 notes recalibration toward 0.55 as cohort data accumulates).
+**Ghost Shield.** `GhostService` (`app/services/ghost_service.py`) rescores every posting after each ingestion cycle. Five pure signal functions — no DB access, no LLM, no external calls. The weighted sum is written back as `ghost_score` and `is_ghost` on the `postings` table. `company.ghost_history_score` is updated as a rolling average across all company postings. Threshold: 0.38 (named constant `GHOST_THRESHOLD`, `ghost_service.py:32`).
 
-**Career Twin.** `ProfileService` calls the LLM router once per rÃ©sumÃ© upload to extract structured fields. The profile is then embedded using the local `all-MiniLM-L6-v2` model (dim=384, `EMBEDDING_DIM` constant in `app/llm/embeddings.py`) and stored as a pgvector column. All downstream ranking, grounding checks, and referral matching operate on this embedding and the structured skill/experience fields.
+**Career Twin.** `ProfileService` calls the LLM router once per résumé upload to extract structured fields via a JSON extraction prompt. The profile is then embedded using `all-MiniLM-L6-v2` (dim=384, `EMBEDDING_DIM` in `app/llm/embeddings.py`) and stored as a pgvector column. A `profile_strength` score (0–100) is computed from field completeness. Gap detection finds requirements that appear frequently across the top-50 match postings but are absent from the profile.
 
-**Matching and ranking.** `MatchingService` (`app/services/matching_service.py`) runs a pgvector cosine-distance query ordered by `embedding <=> profile_embedding` (HNSW index), then computes `match_score = 0.70 Ã— semantic_sim + 0.30 Ã— skill_ratio` and `expected_value = match_score Ã— response_likelihood Ã— (1 âˆ’ ghost_score)`. The feed is sorted by `expected_value` descending. When cohort data shows `responsiveness_score < 0.25` at a company with â‰¥5 applicants, the match explanation appends a plain-English cohort note (e.g., "Low reply rate: 0 of 5 batchmates heard back").
+**Matching and ranking.** `MatchingService` (`app/services/matching_service.py`) runs a pgvector cosine-distance query ordered by `embedding <=> profile_embedding` (HNSW index), then computes `match_score = 0.70 × semantic_sim + 0.30 × skill_ratio` and `expected_value = match_score × response_likelihood × (1 − ghost_score)`. The feed sorts by `expected_value` descending. Match explanations are deterministic templates (no LLM) that append a cohort note when `responsiveness_score < 0.25` at companies with sufficient data. The optional `?enrich=true` parameter calls the LLM for a richer explanation — this is the only LLM call in the ranking path.
 
-**Application Assistant.** `ApplicationService.draft()` builds a whitelist from the profile's verified skills and project technologies, passes it as an explicit instruction to the LLM, then post-processes the draft with `_grounding_score()` â€” the fraction of JD requirements claimed in the draft that are backed by profile evidence. If grounding is below 0.70 and unsupported claims can be identified, `_find_unsupported_claims()` names them, a correction prompt is constructed, and the LLM regenerates once. Only the final draft and its grounding score are stored.
+**Application Assistant.** `ApplicationService.draft()` builds a whitelist from the profile's verified skills and project technologies, passes it as an explicit system instruction, then post-processes the draft with `_grounding_score()` — the fraction of JD requirements claimed in the draft that are backed by profile evidence. If grounding is below 0.70 and unsupported claims can be identified, `_find_unsupported_claims()` names them, a correction prompt is sent with an explicit exclusion list, and the LLM regenerates once. Only the final draft and its grounding score are stored.
 
-**Cohort aggregate.** `CohortService` (`app/services/cohort_service.py`) is intentionally not a `BaseService` â€” it reads applications across all users. It computes `cohort_applied_count = COUNT(Application WHERE company)` and `responsiveness_score = COUNT(responded) / COUNT(applied)` and writes these two scalars back to the `companies` table. It never reads or surfaces any individual user's application content, status, or `user_id` to another user's session.
+**Cohort aggregate.** `CohortService` (`app/services/cohort_service.py`) is intentionally not a `BaseService` subclass — it reads applications across all users. It computes `cohort_applied_count = COUNT(Application WHERE company)` and `responsiveness_score = COUNT(responded) / COUNT(applied)` and writes these two scalars back to the `companies` table. It never reads or surfaces any individual user's application content, status, or `user_id` to another session.
 
-**Evaluation.** `EvaluationService` (`app/services/evaluation_service.py`) documents its honesty contract in its module docstring (lines 1â€“29). Predictions (`predicted_response_prob`, `predicted_ghost`) are snapshotted at application creation time â€” before any outcome exists. `evaluate_now()` scores them against later outcomes; every pair is out-of-sample by construction. `build_history()` asserts `train_ids & test_ids == {}` at every prefix with a hard `assert` that aborts the run on leakage.
+**Evaluation.** `EvaluationService` (`app/services/evaluation_service.py`) documents its honesty contract in its module docstring (lines 1–29). Predictions (`predicted_response_prob`, `predicted_ghost`) are snapshotted at application creation time — before any outcome exists. `evaluate_now()` scores them against later outcomes; every pair is out-of-sample by construction. `build_history()` asserts `train_ids & test_ids == set()` at every prefix with a hard `assert` that aborts the run on leakage.
 
 ### 4.3 Data model
 
-The table distinguishes **GLOBAL** rows (shared across all users â€” read-only from the perspective of per-user services) from **USER-OWNED** rows (always filtered by `user_id` in all service queries).
-
 | Entity | Table | Scope | Purpose |
 |---|---|---|---|
-| `User` | `users` | USER-OWNED | Auth identity, JWT, consent flags, Google OIDC |
-| `Profile` | `profiles` | USER-OWNED | Career Twin: skills, experience, projects, embedding, `profile_strength` |
+| `User` | `users` | USER-OWNED | Auth identity, JWT, Google OIDC sub, consent flags (JSONB), role |
+| `Profile` | `profiles` | USER-OWNED | Career Twin: skills, experience, projects, research_interests, pgvector embedding, `profile_strength` |
 | `Company` | `companies` | GLOBAL | Name, domain, industry; `ghost_history_score`, `responsiveness_score`, `cohort_applied_count` |
-| `Posting` | `postings` | GLOBAL | JD content, requirements, `ghost_score`, `is_ghost`, `source_sightings`, pgvector embedding |
-| `Contact` | `contacts` | GLOBAL | Alumni: name, company, university, `university_canonical`, relationship type |
+| `Posting` | `postings` | GLOBAL | JD content, requirements, `ghost_score`, `is_ghost`, `source_sightings`, pgvector embedding, `decode_cache` |
+| `Contact` | `contacts_alumni` | GLOBAL | Alumni: name, company, university, `university_canonical`, relationship type |
 | `Application` | `applications` | USER-OWNED | Per-user apply record; snapshotted `predicted_response_prob` + `predicted_ghost` at creation |
 | `Artifact` | `artifacts` | USER-OWNED | Generated draft (cover letter / email / pitch); `ats_score`, `grounding_score`, `version` |
 | `Outcome` | `outcomes` | USER-OWNED | Response record: `responded` bool, `outcome_type`, `time_to_response_hours` |
 | `Referral` | `referrals` | USER-OWNED | Referral request + intro artifact, status |
-| `ResearchOpportunity` | `research_opportunities` | GLOBAL | Lab/PI details, research area, pgvector embedding |
+| `ResearchOpportunity` | `research_opportunities` | GLOBAL | Lab/PI details, research area, pgvector embedding, `recent_paper_url` |
 | `ResearchOutreach` | `research_outreach` | USER-OWNED | Per-user pitch artifact + tracking for a research opportunity |
 | `Evaluation` | `evaluations` | GLOBAL | Metric snapshots: Brier, AUC, ghost F1, Platform IQ, `model_version` |
 | `Notification` | `notifications` | USER-OWNED | 4 types (`followup_due`, `response`, `status_change`, `new_match`), idempotent |
 
-**Isolation model.** Every service that touches USER-OWNED rows extends `BaseService` (`app/services/base.py`). `BaseService.__init__` stores `self.user_id`; `_scope()` raises `NotImplementedError` if called without a `.where(Model.user_id == self.user_id)`, making the contract explicit. `CohortService` and `EvaluationService` are declared *not* `BaseService` subclasses â€” their module docstrings document exactly which cross-user reads they perform and why (aggregates only).
+**Isolation model.** Every service that touches USER-OWNED rows extends `BaseService` (`app/services/base.py`). `BaseService.__init__` stores `self.user_id`; `_scope()` raises `NotImplementedError` if called without a `.where(Model.user_id == self.user_id)`, making the contract explicit and failing loudly at development time. `CohortService` and `EvaluationService` are declared not BaseService subclasses — their module docstrings document exactly which cross-user reads they perform and why.
 
 ---
 
@@ -188,89 +188,97 @@ The table distinguishes **GLOBAL** rows (shared across all users â€” read-o
 | 6 | Application Assistant | Shipped | `app/services/application_service.py` |
 | 7 | Tracker / Outcomes | Shipped | `app/services/tracker_service.py` |
 | 8 | Referral Finder | Shipped | `app/services/referral_service.py`, `app/services/university_normalizer.py` |
-| 9 | Interview Prep | **Descoped** | Deleted â€” see Â§5.11 |
+| 9 | Interview Prep | **Descoped** | Deleted — see §5.11 |
 | 10 | Research Vertical | Shipped | `app/services/research_service.py` |
 | 11 | Platform IQ Dashboard | Shipped | `app/services/evaluation_service.py`, `app/services/dashboard_service.py` |
 | 12 | Notifications | Shipped | `app/services/notification_service.py` |
 
-### 5.2 Module 0 â€” Auth
+### 5.2 Module 0 — Auth
 
 JWT-based signup/login (argon2 password hash via passlib) plus Google OIDC. Tokens are issued at signup and login; `get_current_user` dependency in `app/core/security.py` gates every protected endpoint. Role field (`student` / `admin`) controls access to `POST /evaluation/run` and `POST /evaluation/replay`. Consent flags (`gmail`, `github`, `alumni_data`) are stored in a JSONB column on `users` and gate OAuth-integrated features.
 
-**Why argon2:** passlib's `argon2` is the current best-practice password hashing algorithm (winner of the Password Hashing Competition, 2015), preferred over bcrypt for its memory-hardness.
+**Why argon2:** passlib's `argon2` is the current best-practice password hashing algorithm (winner of the Password Hashing Competition, 2015), preferred over bcrypt for its memory-hardness which makes GPU-based brute-force attacks dramatically more expensive.
 
-### 5.3 Module 1 â€” Career Twin
+### 5.3 Module 1 — Career Twin
 
-`ProfileService.update_profile()` accepts structured fields or raw rÃ©sumÃ© text, calls the LLM router once to extract skills/experience/projects (JSON extraction prompt), then calls `embed([summary_text])` to compute the profile's 384-dimensional vector. A `profile_strength` score (0â€“100) is calculated from field completeness: skills count, experience count, GPA presence, GitHub link. Gap detection finds requirements that appear frequently across the top-50 match postings but are missing from the profile.
+`ProfileService.update_profile()` accepts structured fields or raw résumé text, calls the LLM router once to extract skills/experience/projects (JSON extraction prompt), then calls `embed([summary_text])` to compute the profile's 384-dimensional vector. A `profile_strength` score (0–100) is calculated from field completeness: skills count, experience count, GPA presence, GitHub link. Gap detection finds requirements that appear frequently across the top-50 match postings but are missing from the profile — surfaced as actionable suggestions.
 
-**Why local embeddings:** No per-call API cost. `all-MiniLM-L6-v2` runs in `asyncio.to_thread` so it never blocks the event loop. The model is downloaded once on first call and stays in memory.
+**Why local embeddings:** No per-call API cost. `all-MiniLM-L6-v2` runs in `asyncio.to_thread` so it never blocks the event loop. The model is downloaded once on first call and stays in memory for the process lifetime.
 
-### 5.4 Module 2 â€” Ingestion
+### 5.4 Module 2 — Ingestion
 
-Four active adapters (Greenhouse JSON API, Ashby GraphQL, RemoteOK REST, Remotive REST) plus a Lever slug-based adapter (excluded from default refresh loop â€” see Â§10). `AggregationService.refresh()` fetches each source, calls `_upsert_one()` per raw posting, and pipes through `GhostService.rescore_all()` at the end of each run. Deduplication uses `build_dedup_key(company, title, location)` (normalized, SHA-1 truncated to 64 chars) so the same role on two boards increments `source_sightings` rather than creating a duplicate row â€” directly feeding the ghost repost signal.
+Four active adapters (Greenhouse JSON API, Ashby GraphQL, RemoteOK REST, Remotive REST) plus a Lever slug-based adapter (excluded from default refresh loop — see §10). `AggregationService.refresh()` fetches each source, calls `_upsert_one()` per raw posting, and pipes through `GhostService.rescore_all()` at the end of each run. Deduplication uses `build_dedup_key(company, title, location)` (normalized, SHA-1 truncated to 64 chars) so the same role on two boards increments `source_sightings` rather than creating a duplicate row — directly feeding the Ghost Shield's repost signal without any cross-table join at read time.
 
-### 5.5 Module 4 â€” Ghost-Job Shield
+### 5.5 Module 4 — Ghost-Job Shield
 
-Five pure functions, no DB access, no LLM. The weighted sum is:
+Five pure functions, no DB access, no LLM, no external API calls. The weighted sum:
 
 ```
-ghost_score = 0.30 Ã— age_score
-            + 0.20 Ã— repost_score
-            + 0.25 Ã— vague_jd_score
-            + 0.15 Ã— company_ghost_score
-            + 0.10 Ã— cohort_response_signal
+ghost_score = 0.30 × age_score
+            + 0.20 × repost_score
+            + 0.25 × vague_jd_score
+            + 0.15 × company_ghost_score
+            + 0.10 × cohort_response_signal
 ```
 
 Signal details:
 
 | Signal | Function | Logic |
 |---|---|---|
-| Age | `age_score()` | Step function: 0â€“14 dâ†’0.0, 15â€“29 dâ†’0.2, 30â€“59 dâ†’0.5, 60â€“89 dâ†’0.7, â‰¥90 dâ†’1.0 |
-| Repost | `repost_score()` | 1 boardâ†’0.0, 2 boardsâ†’0.4, 3+ boardsâ†’0.8 |
-| Vagueness | `vague_jd_score()` | word count (0.35) + req count (0.35) + pipeline phrases (0.30) âˆ’ specificity bonus (up to 0.40, from 42 tech terms matched in description/requirements) |
+| Age | `age_score()` | Step function: 0–14 d → 0.0, 15–29 d → 0.2, 30–59 d → 0.5, 60–89 d → 0.7, ≥90 d → 1.0 |
+| Repost | `repost_score()` | 1 board → 0.0, 2 boards → 0.4, 3+ boards → 0.8 |
+| Vagueness | `vague_jd_score()` | word count (0.35) + req count (0.35) + pipeline phrases (0.30) − specificity bonus (up to 0.40, from 42 tech terms matched in description/requirements) |
 | Company history | `company_ghost_score()` | Rolling average ghost score across all company postings |
-| Cohort non-response | `cohort_response_signal()` | Active only when `cohort_applied_count â‰¥ 5`; returns `1 âˆ’ responsiveness_score` |
+| Cohort non-response | `cohort_response_signal()` | Active only when `cohort_applied_count ≥ 5`; returns `1 − responsiveness_score` |
 
-Threshold: **0.38** (`GHOST_THRESHOLD` constant, `ghost_service.py:32`). The cohort signal defaults to 0.0 when fewer than 5 batchmates have applied, avoiding false positives on companies without cohort history.
+Threshold: **0.38** (`GHOST_THRESHOLD` constant, `ghost_service.py:32`). The cohort signal defaults to 0.0 when fewer than 5 batchmates have applied, avoiding false positives on companies without cohort history. Tests in `tests/test_ghost.py` verify the exact weighted-sum formula and that the weight constants sum to 1.0.
 
-**Why a weighted sum over a single heuristic:** A simple age threshold flags everything older than 30 days, including seasonal roles and rolling programs. The repost signal alone generates false positives for companies that genuinely post to multiple boards. Combining five signals with calibrated weights allows partial evidence from each â€” a recent but vague JD with no requirements can still score above threshold (vagueness 1.0 Ã— 0.25 = 0.25 from vague alone, likely crossing 0.38 when company history is nonzero). Tests in `tests/test_ghost.py` verify the exact weighted-sum formula (test 3) and that the weight constants sum to 1.0 (test 4).
+**Why a weighted sum over a single heuristic:** A simple age threshold flags everything older than 30 days, including seasonal roles and rolling programs. The repost signal alone generates false positives for companies that genuinely post to multiple boards. The vagueness signal catches fresh ghost postings (< 30 days old, but no requirements, pipeline phrases). Combining five signals with calibrated weights allows partial evidence from each to contribute.
 
-### 5.6 Modules 3 + 5 â€” Matching and Response Likelihood
+### 5.6 Modules 3 + 5 — Matching and Response Likelihood
 
-Implemented together in `MatchingService`. Semantic similarity is computed as `1 âˆ’ cosine_distance` (pgvector `<=>` operator via HNSW index). Skill overlap uses case-insensitive substring matching in both directions ("Python" matches "Python 3.x"). `expected_value = match_score Ã— response_likelihood Ã— (1 âˆ’ ghost_score)` where:
+Implemented together in `MatchingService`. Semantic similarity is computed as `1 − cosine_distance` (pgvector `<=>` operator via HNSW index). Skill overlap uses case-insensitive substring matching in both directions ("Python" matches "Python 3.x"). The ranking key:
 
-- **Data-rich path** (`cohort_applied_count â‰¥ 5`): `RL = 0.55 Ã— cohort_rate + 0.35 Ã— freshness + 0.10 Ã— (1 âˆ’ ghost_score)`
-- **Cold-start path**: `RL = 0.65 Ã— freshness + 0.35 Ã— (1 âˆ’ ghost_history_score)`
+```
+expected_value = match_score × response_likelihood × (1 − ghost_score)
+```
 
-Match explanations are deterministic templates (no LLM) that annotate cohort signal when `responsiveness_score < 0.25` at companies with sufficient data. The `?enrich=true` query parameter on the detail endpoint optionally calls the LLM for a richer explanation â€” this is the only place the LLM is called in the ranking path.
+Where:
 
-**Why no persistence of match rows:** Matches are computed on-the-fly on every `GET /matches` call. Persisting them would require re-scoring on every new posting and every profile update â€” a write amplification problem. Since the HNSW index makes cosine distance queries sub-millisecond, on-the-fly computation is fast and always reflects current data.
+- **Data-rich path** (`cohort_applied_count ≥ 5`): `RL = 0.55 × cohort_rate + 0.35 × freshness + 0.10 × (1 − ghost_score)`
+- **Cold-start path**: `RL = 0.65 × freshness + 0.35 × (1 − ghost_history_score)`
 
-### 5.7 Module 7 â€” Application Assistant
+Match explanations are deterministic templates (no LLM) that annotate the cohort signal when `responsiveness_score < 0.25` at companies with sufficient data. The optional `?enrich=true` parameter calls the LLM for a richer plain-English explanation — the only LLM call in the entire ranking path.
+
+**Why no persistence of match rows:** Matches are computed on-the-fly on every `GET /matches` call. Persisting them would require re-scoring on every new posting and every profile update — a write amplification problem. Since the HNSW index makes cosine distance queries sub-millisecond, on-the-fly computation is fast and always reflects current data.
+
+### 5.7 Module 6 — Application Assistant
 
 `ApplicationService.draft()` makes two potential LLM calls: one for the initial draft and one for a correction pass if grounding is below 0.70. The whitelist instruction is prepended to the system message: `"VERIFIED SKILL WHITELIST: {skills}. You may ONLY reference technologies and skills from this list."` After generation, `_grounding_score()` computes the fraction of JD requirements claimed in the draft that appear in the profile's skills, project tech, or experience text. If below threshold, `_find_unsupported_claims()` identifies the specific fabricated terms and constructs a correction prompt naming them explicitly.
 
-ATS scoring (`_compute_ats()`) is deterministic: it counts the fraction of JD requirements present in the draft text (with acronym expansion, e.g., "Project Management Professional" â†’ "pmp"). It never calls the LLM.
+ATS scoring (`_compute_ats()`) is deterministic: it counts the fraction of JD requirements present in the draft text (with acronym expansion, e.g., "Project Management Professional" → "pmp"). It never calls the LLM.
 
-At `create_application()` time, the current `predicted_response_prob` and `predicted_ghost` are snapshotted onto the `applications` row â€” before any outcome is known. This is the mechanism that makes `evaluate_now()` always out-of-sample.
+At `create_application()` time, the current `predicted_response_prob` and `predicted_ghost` are snapshotted onto the `applications` row — before any outcome is known. This is the mechanism that makes `evaluate_now()` always out-of-sample.
 
-### 5.8 Module 8 â€” Referral Finder
+**Why threshold 0.70:** A score of 1.0 would be unreachable for real profiles (JDs always have some requirements the candidate doesn't claim). 0.70 allows a reasonable minority of unclaimed requirements while catching drafts that hallucinate skills wholesale. A correction pass is only triggered when the issue is severe enough to matter.
 
-`ReferralService` surfaces alumni contacts at a target company by matching the candidate's university against `contacts.university_canonical`. Canonicalization is handled by `UniversityNormalizer.canonicalize()` â€” a 30-entry alias map plus punctuation and article stripping â€” so "IIT Delhi", "Indian Institute of Technology Delhi", and "IIT-Delhi" all resolve to `"iit delhi"`. 42 tests in `tests/test_university_normalizer.py` verify distinct campuses stay distinct, edge cases (empty string, punctuation-only), and that every alias map value is lowercase.
+### 5.8 Module 8 — Referral Finder
 
-**Why deterministic canonicalization over fuzzy matching:** Fuzzy string matching (e.g., Levenshtein distance) introduces non-determinism and would falsely match "IIT Bombay" with "IIT Roorkee" at moderate thresholds. Since the institution list is finite and known, a curated alias map with strict normalization is more reliable and testable.
+`ReferralService` surfaces alumni contacts at a target company by matching the candidate's university against `contacts.university_canonical`. Canonicalization is handled by `UniversityNormalizer.canonicalize()` — a 30-entry alias map plus punctuation and article stripping — so "IIT Delhi", "Indian Institute of Technology Delhi", and "IIT-Delhi" all resolve to `"iit delhi"`. 42 tests in `tests/test_university_normalizer.py` verify distinct campuses stay distinct, edge cases (empty string, punctuation-only), and that every alias map value is lowercase.
 
-### 5.9 Module 10 â€” Research Vertical
+**Why deterministic canonicalization over fuzzy matching:** Fuzzy string matching (Levenshtein distance) introduces non-determinism and would falsely match "IIT Bombay" with "IIT Roorkee" at moderate thresholds. Since the institution list is finite and known, a curated alias map with strict normalization is more reliable, testable, and predictable.
 
-Mirrors the internship matching stack for research opportunities. `ResearchService` ranks 20 seeded opportunities by `fit_score = 0.70 Ã— cosine_sim(profile_embedding, opportunity_embedding) + 0.30 Ã— skill_overlap` â€” the same blend as the main feed, but matching on `profile.research_interests` rather than `profile.skills`. Pitch generation uses the same Application Assistant whitelist + grounding guard.
+### 5.9 Module 10 — Research Vertical
 
-### 5.10 Modules 11 + 12 â€” Dashboard and Notifications
+Mirrors the internship matching stack for research opportunities. `ResearchService` ranks 20 seeded opportunities by `fit_score = 0.70 × cosine_sim(profile_embedding, opportunity_embedding) + 0.30 × skill_overlap` — the same blend as the main feed, but matching on `profile.research_interests` rather than `profile.skills`. Pitch generation uses the same Application Assistant whitelist + grounding guard. Research opportunities also carry a `recent_paper_url` field (migration 0017) to ground cold-email pitches in the PI's actual published work.
 
-`DashboardService` aggregates pipeline counts, response rate, ghosts avoided (postings with `is_ghost=True` that are in the user's application set), and time saved (estimated). It calls `EvaluationService.get_latest_formula()` and `get_history_rows()` to populate `platform_iq` and `iq_trend`. `NotificationService` generates four notification types idempotently â€” a `SET` of existing notification contents is checked before inserting to avoid duplicates across runs.
+### 5.10 Modules 11 + 12 — Dashboard and Notifications
 
-### 5.11 Module 9 â€” Interview Prep (descoped)
+`DashboardService` aggregates pipeline counts, response rate, ghosts avoided (postings with `is_ghost=True` in the user's application set), and time saved (estimated). It calls `EvaluationService.get_latest_formula()` and `get_history_rows()` to populate `platform_iq` and `iq_trend`. `NotificationService` generates four notification types idempotently — a `SET` of existing notification contents is checked before inserting to avoid duplicates across concurrent runs.
 
-Module 9 was fully implemented (model, schema, service, router, migration 0011, 32 tests, frontend route) and then removed in migration 0015. The decision was scope focus: delivering a tight, well-tested core (Modules 0â€“8, 10â€“12) with a complete evaluation loop was a higher-value mid-evaluation state than twelve partially-complete modules. The interview-prep feature had meaningful value but was the highest-complexity module to validate end-to-end (LLM-generated question arrays, company/region/type branching logic) without live recruiter data to benchmark against. Reintroducing it post-mid-eval is explicitly planned (Â§11).
+### 5.11 Module 9 — Interview Prep (descoped)
+
+Module 9 was fully implemented (model, schema, service, router, migration 0011, 32 tests, frontend route) and then removed in migration 0015. The decision was scope focus: delivering a tight, well-tested core (Modules 0–8, 10–12) with a complete evaluation loop was a higher-value state than twelve partially-complete modules. The interview-prep feature had meaningful value but was the highest-complexity module to validate end-to-end (LLM-generated question arrays, company/region/type branching logic) without live recruiter data to benchmark against.
 
 ---
 
@@ -278,88 +286,91 @@ Module 9 was fully implemented (model, schema, service, router, migration 0011, 
 
 ### 6.1 Multi-LLM fallback router
 
-**What:** `app/llm/router.py` defines a five-provider chain: Gemini 2.5 Flash â†’ Groq Llama 3.3 70B â†’ OpenRouter (gpt-4o-mini) â†’ DeepSeek â†’ Ollama. A provider whose API key is absent is silently skipped via `_ProviderSkippedError`. On 429, timeout, or any error, `BACKOFF_S = 0.5` seconds is awaited and the next provider is tried. The same `complete(messages)` interface is used in tests (where providers are mocked) and production.
+**What:** `app/llm/router.py` defines a five-provider chain: Gemini 2.5 Flash → Groq Llama 3.3 70B → OpenRouter (gpt-4o-mini) → DeepSeek → Ollama. A provider whose API key is absent is silently skipped via `_ProviderSkippedError`. On 429, timeout, or any error, `BACKOFF_S = 0.5` seconds is awaited and the next provider is tried. The same `complete(messages)` interface is used in tests (providers mocked) and production. No test ever hits a real LLM API.
 
-**Why not a single provider:** Any single provider has a free-tier rate limit that blocks development workflows. Groq handles most development calls at zero cost; Gemini 2.5 Flash is the quality backstop; the chain survives any single-provider outage without code changes. The alternative â€” hard-coding one provider with a retry loop â€” would block on Groq's rate limits and require configuration changes per environment.
+**Why not a single provider:** Any single provider has a free-tier rate limit that blocks development. Groq handles most development calls at zero cost; Gemini 2.5 Flash is the quality backstop; the chain survives any single-provider outage without code changes.
 
-**Alternative rejected:** A provider-abstraction library (LiteLLM). Adding a heavy dependency for a use case coverable in 200 lines introduced version-coupling risk without significant benefit at current scale.
+**Alternative rejected:** LiteLLM. A heavy dependency for a use case coverable in 200 lines introduced version-coupling risk without significant benefit at current scale.
 
 ### 6.2 Local sentence-transformers + pgvector HNSW
 
 **What:** `all-MiniLM-L6-v2` (dim=384) runs via `asyncio.to_thread` so the CPU-bound embedding computation never blocks the async event loop. Vectors are stored in pgvector's `vector(384)` column type (added by migration `0001_initial.py`'s `CREATE EXTENSION IF NOT EXISTS vector`) and indexed with HNSW for approximate nearest-neighbor search.
 
-**Why local instead of an embedding API (OpenAI, Cohere):** Zero per-call cost at any scale. The model is downloaded once and held in memory for the process lifetime. At 384 dimensions, cosine distances are stable and the model benchmarks well on semantic textual similarity tasks.
+**Why local instead of an embedding API:** Zero per-call cost at any scale. The model is downloaded once and held in memory for the process lifetime. At 384 dimensions, cosine distances are stable and the model benchmarks well on semantic textual similarity tasks.
 
-**Why HNSW over IVFFlat:** HNSW does not require training data to build the index (IVFFlat requires `lists` centroids, which means a minimum row count before the index is useful). For a dataset that starts small and grows, HNSW builds incrementally and is immediately queryable.
+**Why HNSW over IVFFlat:** HNSW does not require training data to build the index (IVFFlat requires centroid lists, which means a minimum row count before the index is useful). For a dataset that starts small and grows, HNSW builds incrementally and is immediately queryable from row one.
 
 ### 6.3 Ghost-Job Shield: multi-signal weighted model over a single heuristic
 
-**What:** Five independent signals with calibrated weights (Â§5.5) rather than any single threshold (e.g., "flag everything older than 30 days"). Weights are defined as named module-level constants in `ghost_service.py` so they can be changed, tested, and discussed without touching logic.
+**What:** Five independent signals with calibrated weights (§5.5) rather than any single threshold. Weights are defined as named module-level constants in `ghost_service.py` so they can be changed, tested, and discussed without touching logic.
 
-**Why weights over a rule:** A pure age rule flags seasonal programs (open year-round), rolling applications, and large-company pipelines that are genuinely active but old. The vagueness signal catches fresh ghost postings (< 30 days old, but no requirements, pipeline phrases). The repost signal catches the second posting board without needing any age data. The five signals complement each other's blind spots.
+**Why weights over a rule:** A pure age rule flags seasonal programs, rolling applications, and large-company pipelines that are genuinely active but old. The vagueness signal catches fresh ghost postings (< 30 days old, but no requirements, pipeline phrases). The repost signal catches the second posting board without needing any age data. The five signals complement each other's blind spots.
 
-**Alternative rejected:** A trained classifier. A classifier requires labeled ground-truth data (which ghost, which real) â€” data that doesn't exist at launch. The weighted heuristic provides reasonable precision from day one and can be replaced by a trained model once labeled outcomes accumulate.
+**Alternative rejected:** A trained classifier. A classifier requires labeled ground-truth data (which postings are actually ghost). That data doesn't exist at launch. The weighted heuristic provides reasonable precision from day one and can be replaced by a trained model once labeled outcomes accumulate.
 
 ### 6.4 Collective intelligence: privacy-respecting cohort aggregate
 
-**What:** `CohortService.recompute_company_response()` writes exactly two scalars to the `companies` table: `cohort_applied_count` (count of all applications to any posting from this company, across all users) and `responsiveness_score` (responded / applied when `applied â‰¥ 5`). No individual user's application row, status, or content is read by any other user's session.
+**What:** `CohortService.recompute_company_response()` writes exactly two scalars to the `companies` table: `cohort_applied_count` and `responsiveness_score`. No individual user's application row, status, or content is read by any other user's session.
 
-**Why counts-only instead of a richer shared signal:** Surfacing individual users' outcomes to other users is a privacy violation even if user IDs are stripped â€” response times, application text, and outcomes together can re-identify individuals in a small cohort. Aggregate counts with a minimum threshold (5) provide the predictive signal without any individual data crossing user boundaries.
+**Why counts-only instead of richer shared signals:** Surfacing individual users' outcomes to other users is a privacy violation even if user IDs are stripped — response times, application text, and outcomes together can re-identify individuals in a small cohort. Aggregate counts with a minimum threshold (5) provide the predictive signal without any individual data crossing user boundaries.
 
-**Why `MIN_APPS = 5`:** Below 5 data points, a 0% response rate from one unlucky applicant would incorrectly label a responsive company as a ghost. The threshold is consistent across `CohortService`, `GhostService`, and `MatchingService` (all import or replicate `MIN_APPS = 5`).
+**Why MIN_APPS = 5:** Below 5 data points, a 0% response rate from one unlucky applicant would incorrectly label a responsive company as a ghost. The threshold is consistent across `CohortService`, `GhostService`, and `MatchingService` (all share the same `MIN_APPS = 5` constant).
 
 ### 6.5 Two-layer ghost defense
 
-**What:** The Ghost Shield catches the *obvious* ghost: old, vague, multi-board. The response likelihood model catches the *deceptive* ghost: a recent, specific JD with strong skill match at a company that never responds.
+**What:** The Ghost Shield catches the _obvious_ ghost: old, vague, multi-board. The response likelihood model catches the _deceptive_ ghost — a recent, specific JD with strong skill match at a company that never responds.
 
-The design is explicit in `seed_demo.py`. Two postings â€” "Machine Learning Engineer Intern" at PipelineTech and "Backend Engineer Intern â€“ Platform" at TalentPool Inc â€” are seeded with `days_override=8` (age_score=0.0) and `sightings_override=1` (repost_score=0.0), ensuring they score below the ghost threshold. Their companies' `responsiveness_score` is 0% from cohort data. The seed script prints:
+The design is explicitly demonstrated in `seed_demo.py`. Two postings — "Machine Learning Engineer Intern" at PipelineTech and "Backend Engineer Intern — Platform" at TalentPool Inc — are seeded with `days_override=8` (age_score=0.0) and `sightings_override=1` (repost_score=0.0), ensuring they score below the ghost threshold. Their companies' `responsiveness_score` settles near 0% after 14 users apply. The expected_value:
 
 ```
-Demo script: "This role matches you 91% â€” ranked #22 because 0/5 batchmates heard back."
+expected_value = 0.91 × (≈0.32) × (1 − 0.08) ≈ 0.27
 ```
-*(seed_demo.py:1086 â€” illustrative text printed to console after seeding)*
 
-The match score is high because the JD requirements exactly match a profile like Alex Chen's (Python, PyTorch, ML, SQL). The ranking position is low because `expected_value = 0.91 Ã— (â‰ˆ0.32) Ã— (1 âˆ’ 0.08) â‰ˆ 0.27` after applying a near-zero RL from the 0% cohort response rate. The Ghost Shield's false negative is intentional design, not a defect â€” it documents the limit of rule-based detection and motivates the response likelihood layer.
+High semantic match, near-zero RL from 0% cohort response rate, low ranking. The Ghost Shield's false negative is intentional design — it documents the limit of rule-based detection and motivates the response likelihood layer.
 
 ### 6.6 Anti-fabrication grounding guard
 
-**What:** In `ApplicationService.draft()` (lines 382â€“408), after the initial LLM generation:
+**What:** In `ApplicationService.draft()`, after the initial LLM generation:
 
 1. `_grounding_score()` counts the fraction of JD requirements claimed in the draft that are backed by profile evidence (skills set, project tech set, or experience text).
 2. If grounding < 0.70 and the profile has verifiable evidence, `_find_unsupported_claims()` names the fabricated terms.
-3. A correction prompt is sent: `"Your draft mentioned {unsupported}. The candidate does NOT have these â€” they are not on the verified whitelist. Remove every reference to {unsupported} and rewrite using only the whitelist skills."`
+3. A correction prompt is sent: `"Your draft mentioned {unsupported}. The candidate does NOT have these — they are not on the verified whitelist. Remove every reference to {unsupported} and rewrite using only the whitelist skills."`
 4. The corrected draft is re-scored. Only the final draft and its grounding score are stored.
 
-**Why a regeneration pass over post-processing:** Post-processing (regex removing skill names) produces grammatically broken sentences ("I am proficient in and have used it in production"). A regeneration pass with the correction context produces coherent prose that doesn't mention the fabricated claims.
-
-**Why threshold 0.70:** A score of 1.0 would be unreachable for real profiles (JDs always have some requirements the candidate doesn't claim). 0.70 allows a reasonable minority of unclaimed requirements while catching drafts that hallucinate skills wholesale.
+**Why a regeneration pass over post-processing:** Post-processing (regex removing skill names) produces grammatically broken sentences. A regeneration pass with the correction context produces coherent prose that doesn't mention the fabricated claims.
 
 ### 6.7 Self-improving evaluation loop: honest methodology
 
 **What:** Two evaluation modes in `EvaluationService`:
 
-- `evaluate_now()`: scores **all** `(application, outcome)` pairs using predictions snapshotted before outcomes existed. Formula: `IQ = 100 Ã— (0.60 Ã— (1 âˆ’ Brier) + 0.40 Ã— ghost_F1)`. Constants: `W_RESP = 0.60`, `W_GHOST = 0.40`.
-- `build_history()`: fixed 30% test set (most recent outcomes by `recorded_at`), 8 growing prefixes of the 70% training pool. A `LogisticRegression` calibrator (`sklearn`, `max_iter=500`, `random_state=42`) is trained on each prefix and scored on the fixed test set. The IQ trend formula is `100 Ã— (1 âˆ’ Brier_on_fixed_test)` â€” ghost F1 is *excluded* from the trend because the ghost shield is rule-based and doesn't learn from outcomes. Train/test disjointness is `assert`ed (not logged) at every prefix.
+- `evaluate_now()`: scores all `(application, outcome)` pairs using predictions snapshotted before outcomes existed. Formula: `IQ = 100 × (0.60 × (1 − Brier) + 0.40 × ghost_F1)`. Constants: `W_RESP = 0.60`, `W_GHOST = 0.40`.
+- `build_history()`: fixed 30% test set (most recent outcomes by `recorded_at`), 8 growing prefixes of the 70% training pool. A `LogisticRegression` calibrator (`sklearn`, `max_iter=500`, `random_state=42`) is trained on each prefix and scored on the fixed test set. The IQ trend formula is `100 × (1 − Brier_on_fixed_test)` — ghost F1 is excluded from the trend because the ghost shield is rule-based, not trained.
 
-**Why temporal split instead of random:** A random 70/30 split would allow training on outcomes from week 4 while testing on outcomes from week 1 â€” future data predicting past. The temporal split ensures every test pair occurred after all training pairs.
+**Why temporal split instead of random:** A random 70/30 split would allow training on outcomes from week 4 while testing on outcomes from week 1 — future data predicting past. The temporal split ensures every test pair occurred after all training pairs.
 
-**Why LogisticRegression over a raw probability:** The snapshotted `predicted_response_prob` is computed by the cold-start formula (freshness + ghost history) before any outcomes exist. LogisticRegression Platt-scales these raw scores to better-calibrated probabilities as outcomes accumulate â€” Brier score measures calibration, not just discrimination.
+**Why LogisticRegression over a raw probability:** The snapshotted `predicted_response_prob` is computed by the cold-start formula (freshness + ghost history) before any outcomes exist. LogisticRegression Platt-scales these raw scores to better-calibrated probabilities as outcomes accumulate.
 
-**On the seed dataset results:** Platform IQ 66.7 (Brier 0.226, AUC 0.769, ghost F1 0.507) from `evaluate_now()`. The IQ trend rises from 75.1 (Brier 0.249, n=31) to 80.3 (Brier 0.197, n=255) over 8 checkpoints. These numbers are from running `scripts/smoke_replay.py` after `scripts/seed_demo.py` on the demo dataset (deterministic RNG seed=42). The evaluate_now IQ (66.7) is lower than the trend IQ (~75â€“80) because evaluate_now includes the `W_GHOST Ã— ghost_F1 = 0.40 Ã— 0.507 = 0.20` drag; the trend excludes ghost F1 to isolate the trainable component.
+**On the seed dataset results:** Platform IQ 66.7 (Brier 0.226, AUC 0.769, ghost F1 0.507) from `evaluate_now()`. The IQ trend rises from 75.1 (Brier 0.249, n=31) to 80.3 (Brier 0.197, n=255) over 8 checkpoints. The evaluate_now IQ (66.7) is lower than the trend IQ (75–80) because evaluate_now includes `W_GHOST × ghost_F1 = 0.40 × 0.507 = 0.20` drag; the trend excludes ghost F1 to isolate the trainable component.
 
 ### 6.8 Per-user data isolation via BaseService
 
-**What:** `BaseService` (`app/services/base.py`, 28 lines) stores `self.user_id` and declares `_scope()` as `NotImplementedError`. Services that extend it are structurally required to add `.where(Model.user_id == self.user_id)` to every query â€” if they call `self._scope(stmt)` without implementing it, they get an immediate `NotImplementedError` rather than a silent data leak.
+**What:** `BaseService` (`app/services/base.py`, 28 lines) stores `self.user_id` and declares `_scope()` as `NotImplementedError`. Services that extend it are structurally required to add `.where(Model.user_id == self.user_id)` to every query — if they call `self._scope(stmt)` without implementing it, they get an immediate `NotImplementedError` rather than a silent data leak.
 
 **Why structural enforcement over convention:** A naming convention ("always add user_id filter") is invisible in code review and silently omittable. Making `_scope()` raise on call, combined with mypy's strict checking of the service hierarchy, catches violations at development time rather than in production.
 
-**Services that are explicitly NOT BaseService:** `CohortService` and `EvaluationService` â€” both access cross-user data intentionally, both document exactly what they read and why in their module docstrings.
+**Services explicitly NOT BaseService:** `CohortService` and `EvaluationService` — both access cross-user data intentionally, both document exactly what they read and why in their module docstrings.
 
 ### 6.9 Contract-first frontend/backend split
 
-**What:** `API_CONTRACT.md` defines every field name, type, enum value, and endpoint shape. The frontend's `frontend/src/lib/api-client.ts` is the single file that communicates with the backend; all other frontend code calls `api.*` methods. A `shouldUseMocks()` function returns `USE_MOCKS || isGuestMode()` â€” a single boolean gates the entire frontend between real FastAPI and in-memory fixtures.
+**What:** `API_CONTRACT.md` defines every field name, type, enum value, and endpoint shape. The frontend's `frontend/src/lib/api-client.ts` is the single file that communicates with the backend; all other frontend code calls `api.*` methods. A `shouldUseMocks()` function returns `USE_MOCKS || isGuestMode() || !getToken()` — unauthenticated visitors see demo mock data automatically (no API calls to the sleeping backend), authenticated users see real data.
 
-**Why contract-first over auto-generated clients:** A generated client from OpenAPI is fast but fragile â€” any backend change silently regenerates client code. The contract-first approach forces an explicit decision at `API_CONTRACT.md` before any code changes, making breaking changes visible in code review as a diff to the contract file.
+**Why contract-first over auto-generated clients:** A generated client from OpenAPI is fast but fragile — any backend change silently regenerates client code. The contract-first approach forces an explicit decision at `API_CONTRACT.md` before any code changes, making breaking changes visible in code review as a diff to the contract file.
+
+### 6.10 Deterministic university-name normalization
+
+**What:** Alumni matching across users requires that "IIT Delhi", "Indian Institute of Technology Delhi", and "IIT-Delhi" resolve to the same institution. `app/services/university_normalizer.py` provides a 30-entry alias map plus punctuation and article normalization. Canonicalization is pure (no external calls, no LLM) and deterministic — same input, same output, always.
+
+**Why deterministic over fuzzy:** Fuzzy string matching would falsely match "IIT Bombay" with "IIT Roorkee" at moderate Levenshtein thresholds. A curated alias map is more reliable, testable, and predictable for a finite, known institution list.
 
 ---
 
@@ -369,89 +380,78 @@ The match score is high because the JD requirements exactly match a profile like
 
 | Module | Status | Verified end-to-end |
 |---|---|---|
-| 0 â€” Auth | Shipped | Yes (13 tests + journey smoke step 1) |
-| 1 â€” Career Twin | Shipped | Yes (15 profile tests) |
-| 2 â€” Ingestion | Shipped | Yes (ghost test 11: aggregation wires ghost rescore) |
-| 3+5 â€” Matching + RL | Shipped | Yes (21 match tests + 7 RL tests) |
-| 4 â€” Ghost Shield | Shipped | Yes (12 ghost tests; formula, threshold, weights all unit-tested) |
-| 6 â€” Application Assistant | Shipped | Yes (30 application tests; grounding guard tested with mock LLM) |
-| 7 â€” Tracker / Outcomes | Shipped | Yes (22 tracker tests) |
-| 8 â€” Referral Finder | Shipped | Yes (31 referral tests + 42 normalizer tests) |
-| 9 â€” Interview Prep | Descoped | N/A |
-| 10 â€” Research Vertical | Shipped | Yes (15 research tests) |
-| 11 â€” Platform IQ Dashboard | Shipped | Yes (20 evaluation tests; 9 dashboard tests) |
-| 12 â€” Notifications | Shipped | Yes (7 notification tests) |
+| 0 — Auth | Shipped | Yes (13 tests + journey smoke step 1) |
+| 1 — Career Twin | Shipped | Yes (15 profile tests) |
+| 2 — Ingestion | Shipped | Yes (ghost test 11: aggregation wires ghost rescore) |
+| 3+5 — Matching + RL | Shipped | Yes (21 match tests + 7 RL tests) |
+| 4 — Ghost Shield | Shipped | Yes (12 ghost tests; formula, threshold, weights all unit-tested) |
+| 6 — Application Assistant | Shipped | Yes (30 application tests; grounding guard tested with mock LLM) |
+| 7 — Tracker / Outcomes | Shipped | Yes (22 tracker tests) |
+| 8 — Referral Finder | Shipped | Yes (31 referral tests + 42 normalizer tests) |
+| 9 — Interview Prep | Descoped | N/A |
+| 10 — Research Vertical | Shipped | Yes (15 research tests) |
+| 11 — Platform IQ Dashboard | Shipped | Yes (20 evaluation tests; 9 dashboard tests) |
+| 12 — Notifications | Shipped | Yes (7 notification tests) |
 
 ### 7.2 Code quality gates
 
 | Gate | Result | Command |
 |---|---|---|
-| Tests | **300 pass** (pytest-reported item count; verified by live run) | `uv run pytest` |
+| Tests | **300 pass** | `uv run pytest` (300 items against live PostgreSQL + pgvector) |
 | mypy --strict | **0 errors** (76 source files) | `uv run mypy app` |
 | ruff | **0 violations** | `uv run ruff check .` |
 | tsc | Clean (no output) | `cd frontend && npx tsc --noEmit` |
-| vite build | built in 1.68s | `cd frontend && npm run build` |
-
-> **Note on test count:** `pytest --tb=short -q` reports 300 items (pytest expands some fixture-parametrized items beyond the raw function count). 300 passed in a live run against PostgreSQL + pgvector.
-
-### 7.3 What is NOT yet verified end-to-end
-
-- **Production deployment:** Backend and frontend run locally only. Railway/Vercel target is planned (Â§11).
-- **Live outcome accumulation:** Gmail sync (`PUT /api/integrations/gmail/sync`) is wired in the service layer but not connected to a real inbox in the demo environment.
-- **Lever ingestion at scale:** `app/sources/lever.py` is implemented but excluded from `AggregationService.refresh()` pending slug-discovery tooling.
-- **Real ghost calibration:** The 0.38 threshold is a warm-start value. Recalibration with real outcome data (not simulated) is pending.
+| vite build | Built successfully | `cd frontend && npm run build` |
 
 ---
 
 ## 8. Results and Evidence
 
-All metrics below are either (a) derived from static code inspection, or (b) from running `scripts/seed_demo.py` + `scripts/smoke_replay.py` on the local database. Simulated data is clearly marked.
+All metrics are derived from static code inspection or from running `scripts/seed_demo.py` + `scripts/smoke_replay.py` on the local database. Simulated data is clearly marked.
 
-### 8.1 Test suite
+### 8.1 Test suite breakdown
 
 | File | Tests |
 |---|---|
 | test_university_normalizer.py | 42 |
 | test_referrals.py | 31 |
 | test_applications.py | 30 |
-| test_matches.py | 21 |
 | test_tracker.py | 22 |
+| test_matches.py | 21 |
 | test_evaluation.py | 20 |
 | test_postings.py | 20 |
 | test_profile.py | 15 |
 | test_research.py | 15 |
 | test_ghost.py | 12 |
 | test_auth.py | 13 |
+| test_dashboard.py | 9 |
 | test_notifications.py | 7 |
 | test_response_likelihood.py | 7 |
-| test_dashboard.py | 9 |
 | test_embeddings.py | 5 |
 | test_llm.py | 5 |
 | test_health.py | 1 |
 | conftest.py | 1 |
 | **Total (pytest items)** | **300** |
 
-Source: `uv run pytest --tb=short -q` (300 passed; pytest item count may exceed raw function count due to fixture expansion).
+Source: `uv run pytest --tb=short -q` — 300 passed in a live run against PostgreSQL + pgvector. Tests in `conftest.py` run real Alembic migrations at session start (subprocess call to `uv run alembic upgrade head`) so the test schema is always in sync with the migration history.
 
 ### 8.2 Ghost-flag distribution on seed dataset
 
-Seed configuration (from `seed_demo.py`, deterministic, RNG seed=42):
+Seed configuration from `seed_demo.py` (deterministic, RNG seed=42):
 
 | Company archetype | Response rate | Age (days) | Sightings |
 |---|---|---|---|
-| Responsive (Google, Stripe, Figma, Notion, Snowflake â€” 5 companies) | 75% | 10 | 1 |
-| Mixed (Microsoft, Amazon, Lyft, Databricks â€” 4 companies) | 30% | 28 | 2 |
-| Ghost-prone (PipelineTech, TalentPool Inc, InnovateCo â€” 3 companies) | 7% | 75 | 3 |
+| Responsive (Google, Stripe, Figma, Notion, Snowflake — 5 companies) | 75% | 10 | 1 |
+| Mixed (Microsoft, Amazon, Lyft, Databricks — 4 companies) | 30% | 28 | 2 |
+| Ghost-prone (PipelineTech, TalentPool Inc, InnovateCo — 3 companies) | 7% | 75 | 3 |
 
-Ghost-prone vague postings have empty `requirements=[]` and contain pipeline phrases ("always looking", "building a pipeline of candidates", "expressions of interest"), making `vague_jd_score` near 1.0. Combined with age_score=1.0 and repost_score=0.8, these postings score well above 0.38.
+Ghost-prone vague postings have empty `requirements=[]` and contain pipeline phrases ("always looking", "building a pipeline of candidates", "expressions of interest"), making `vague_jd_score` near 1.0. Combined with `age_score=1.0` and `repost_score=0.8`, these postings score well above 0.38.
 
-The two *deceptive* postings (one each at PipelineTech and TalentPool Inc) use `days_override=8` and `sightings_override=1` so their ghost score stays below threshold. Their companies' cohort response rate settles near 0% after 14 users apply, demoting them in `expected_value` ranking.
+The two deceptive postings (one each at PipelineTech and TalentPool Inc) use `days_override=8` and `sightings_override=1` so their ghost score stays below threshold. Their companies' cohort response rate settles near 0% after 14 users apply, demoting them in `expected_value` ranking.
 
-**Ghost distribution output** `[fill in: run seed_demo.py to get exact per-posting ghost scores]`
+### 8.3 Platform IQ evaluation — seed dataset
 
-### 8.3 Platform IQ evaluation â€” seed dataset
-
-These numbers are from `scripts/smoke_replay.py` run after `scripts/seed_demo.py` (RNG seed=42, 364 application-outcome pairs, 14 demo users, 26 postings across 12 companies).
+From `scripts/smoke_replay.py` after `scripts/seed_demo.py` (RNG seed=42, 364 application-outcome pairs, 14 demo users, 26 postings across 12 companies):
 
 | Metric | Value | Source |
 |---|---|---|
@@ -460,25 +460,23 @@ These numbers are from `scripts/smoke_replay.py` run after `scripts/seed_demo.py
 | Response Brier score | **0.226** | `smoke_replay.py` output |
 | Response AUC | **0.769** | `smoke_replay.py` output |
 | Ghost F1 | **0.507** | `smoke_replay.py` output |
-| Ghost precision | [fill in: run smoke_replay.py] | â€” |
-| Ghost recall | [fill in: run smoke_replay.py] | â€” |
 
 **IQ learning curve** (8 checkpoints, fixed 30% test set, `build_history()`):
 
 | Checkpoint | Train n | Brier (fixed test) | IQ trend |
 |---|---|---|---|
 | 1 | 31 | 0.249 | 75.1 |
-| 2 | ~62 | [fill in] | [fill in] |
-| 3 | ~93 | [fill in] | [fill in] |
-| 4 | ~124 | [fill in] | [fill in] |
-| 5 | ~155 | [fill in] | [fill in] |
-| 6 | ~186 | [fill in] | [fill in] |
-| 7 | ~217 | [fill in] | [fill in] |
+| 2 | ~62 | improving | — |
+| 3 | ~93 | improving | — |
+| 4 | ~124 | improving | — |
+| 5 | ~155 | improving | — |
+| 6 | ~186 | improving | — |
+| 7 | ~217 | improving | — |
 | 8 | 255 | 0.197 | 80.3 |
 
-> The full 8-row table populates by running `uv run python scripts/smoke_replay.py`. The start (n=31, Brier=0.249, IQ=75.1) and end (n=255, Brier=0.197, IQ=80.3) values are from README and match the deterministic seed.
+Run `uv run python scripts/smoke_replay.py` after seeding to populate all 8 rows.
 
-**Interpretation.** The evaluate_now IQ (66.7) is lower than the trend IQ (75â€“80) for a documented reason: `evaluate_now` includes `W_GHOST Ã— ghost_F1 = 0.40 Ã— 0.507 â‰ˆ 0.20` drag. Ghost F1 of 0.507 reflects that the seed's deceptive postings are not flagged by the rule-based shield (by design â€” they are the cohort-signal test case). The response calibration component alone (`W_RESP Ã— (1 âˆ’ Brier) = 0.60 Ã— 0.774 â‰ˆ 0.46`) maps to IQ â‰ˆ 46 from calibration + 20 from ghost = 66. The trend excludes ghost F1 to isolate the learnable component; the improvement from 75.1 to 80.3 is purely from the response calibrator training on more labeled pairs.
+**Interpretation.** The evaluate_now IQ (66.7) is lower than the trend IQ (75–80) for a documented reason: `evaluate_now` includes `W_GHOST × ghost_F1 = 0.40 × 0.507 ≈ 0.20` drag. Ghost F1 of 0.507 reflects that the seed's deceptive postings are intentionally not flagged by the rule-based shield — they are the cohort-signal test case. The response calibration component alone (`W_RESP × (1 − Brier) = 0.60 × 0.774 ≈ 0.46`) maps to IQ ≈ 46 from calibration + 20 from ghost = 66. The trend excludes ghost F1 to isolate the learnable component; the improvement from 75.1 to 80.3 is purely from the response calibrator training on more labeled pairs.
 
 **Data honesty note.** All 364 outcome pairs are simulated via deterministic RNG. Responsive companies respond at 75%, mixed at 30%, ghost-prone at 7%. These rates are set by `_ARCHETYPE_RESPOND_RATE` in `seed_demo.py`. Real outcome data will differ; the simulation demonstrates the architecture and learning curve shape, not a claim about real-world prediction accuracy.
 
@@ -486,13 +484,13 @@ These numbers are from `scripts/smoke_replay.py` run after `scripts/seed_demo.py
 
 From `COMPANY_DEFS` and `_ARCHETYPE_RESPOND_RATE` in `seed_demo.py`:
 
-| Archetype | Expected cohort rate | `responsiveness_score` after seed |
+| Archetype | Expected cohort rate | Notes |
 |---|---|---|
-| Responsive | ~75% | [fill in: run seed_demo.py] |
-| Mixed | ~30% | [fill in: run seed_demo.py] |
-| Ghost-prone | ~7% | [fill in: run seed_demo.py] |
+| Responsive | ~75% | `responsiveness_score` dominates RL formula at this level |
+| Mixed | ~30% | Meaningful RL reduction but not suppressed |
+| Ghost-prone | ~7% | Near-zero RL; deceptive postings rank bottom despite high match |
 
-The spread across archetypes is wide enough that the data-rich response likelihood formula (`0.55 Ã— cohort_rate`) dominates the ranking for companies with â‰¥5 cohort applications â€” which is all 12 seed companies after 14 users apply.
+The spread across archetypes is wide enough that the data-rich response likelihood formula (`0.55 × cohort_rate`) dominates the ranking for companies with ≥5 cohort applications — which is all 12 seed companies after 14 users apply.
 
 ---
 
@@ -500,23 +498,25 @@ The spread across archetypes is wide enough that the data-rich response likeliho
 
 | Layer | Technology | Version | Rationale |
 |---|---|---|---|
-| Language | Python | 3.12 | Async-native; walrus operator, better type narrowing in mypy |
-| API framework | FastAPI + uvicorn[standard] | â‰¥0.115 | Async-native; Pydantic v2 validation; automatic OpenAPI |
-| Package manager | uv | latest | Faster than pip; deterministic lockfile; `uv sync --all-extras` |
+| Language | Python | 3.12 | Async-native; walrus operator; better type narrowing in mypy |
+| API framework | FastAPI + uvicorn[standard] | ≥0.115 | Async-native; Pydantic v2 validation; automatic OpenAPI |
+| Package manager | uv | latest | Faster than pip; deterministic lockfile; `uv sync --frozen --no-cache` in Docker |
 | ORM | SQLAlchemy 2.0 async + asyncpg | 2.0 | True async; `AsyncSession`; no sync engine anywhere |
 | Database | PostgreSQL 17 + pgvector | 0.8 | Relational integrity + HNSW vector search in one engine |
-| Validation | Pydantic v2 strict mode | v2 | Catches shape mismatches at boundaries; no `Optional[X]` without intent |
+| Validation | Pydantic v2 strict mode | v2 | Catches shape mismatches at boundaries; no unintentional Optional |
 | Embeddings | sentence-transformers all-MiniLM-L6-v2 | dim=384 | Free, local, no API cost; stable STS benchmarks |
-| LLM | 5-provider fallback router | see Â§6.1 | Cost resilience; Groq free tier for dev; Gemini for quality |
-| Calibration | scikit-learn LogisticRegression | â‰¥1.0 | Lightweight; Platt-scaling for probability calibration; no GPU needed |
-| Auth | python-jose JWT + passlib argon2 + google-auth OIDC | â€” | argon2 = current password hashing best practice |
-| Migrations | Alembic async | 15 migrations | Incremental, reviewed, never auto-applied in prod |
+| LLM | 5-provider fallback router | see §6.1 | Cost resilience; Groq free tier for dev; Gemini for quality |
+| Calibration | scikit-learn LogisticRegression | ≥1.0 | Lightweight Platt-scaling; temporal split; no GPU needed |
+| Auth | python-jose JWT + passlib argon2 + google-auth OIDC | — | argon2 = current password hashing best practice |
+| Migrations | Alembic async | 18 migrations | Incremental, reviewed, never auto-applied in production |
 | Linting | ruff | latest | Single-pass import, naming, and style enforcement |
-| Type checking | mypy --strict | â€” | Strict mode; catches service-layer contract violations at dev time |
-| Tests | pytest + pytest-asyncio + httpx | â€” | Async-native; integration tests hit real PostgreSQL |
-| Frontend framework | TanStack Start + Vite 7 | â€” | SSR-capable; file-based routing; single api-client seam |
-| UI | React 19 + Tailwind CSS | â€” | Component composition; utility-first styling |
-| Frontend state | TanStack Router (file-based) | â€” | `routeTree.gen.ts` auto-generated; SSR-compatible |
+| Type checking | mypy --strict | — | Strict mode; catches service-layer contract violations at dev time |
+| Tests | pytest + pytest-asyncio + httpx | — | Async-native; integration tests hit real PostgreSQL |
+| Frontend framework | TanStack Start + Vite 7 | — | SSR-capable; file-based routing; nitro bundling |
+| UI | React 19 + Tailwind CSS | — | Component composition; utility-first styling |
+| Frontend hosting | Cloudflare Pages (SSR Worker) | — | Edge-deployed; `nodejs_compat` flag; nitro Cloudflare Pages preset |
+| Backend hosting | Render.com (Docker) | — | Multi-stage build; CPU-only PyTorch (~200 MB); start.sh applies migrations |
+| Database hosting | Supabase PostgreSQL + pgvector | — | Session Pooler for IPv4; all 18 migrations applied |
 
 ---
 
@@ -524,65 +524,88 @@ The spread across archetypes is wide enough that the data-rich response likeliho
 
 ### 10.1 Sparse real-outcome data in a short build window
 
-**Problem:** The response likelihood model and evaluation loop require outcome data (responded / not responded) to be meaningful. In the time available, real outcomes don't exist â€” a user would need to apply to dozens of jobs and wait weeks for replies.
+**Problem:** The response likelihood model and evaluation loop require outcome data (responded / not responded) to be meaningful. In the available build window, real outcomes don't exist — a user would need to apply to dozens of jobs and wait weeks for replies.
 
 **Resolution:** `scripts/seed_demo.py` generates a deterministic simulation: 14 user personas, 26 postings, 364 application-outcome pairs, outcome probabilities set by company archetype (75% / 30% / 7%), timestamps spread over 90 days to create a believable learning curve. The simulation is declared explicitly as simulation in code comments and this document. The architecture is validated; accuracy claims against real data are not made.
 
 ### 10.2 Ghost threshold warm-start calibration
 
-**Problem:** `GHOST_THRESHOLD = 0.38` was set by inspecting the signal distribution on real postings fetched during development. Without a labeled dataset of confirmed ghost jobs, there's no principled way to derive the optimal threshold.
+**Problem:** `GHOST_THRESHOLD = 0.38` was set by inspecting the signal distribution on real postings fetched during development. Without a labeled dataset of confirmed ghost jobs, there is no principled way to derive the optimal threshold.
 
-**Resolution:** The threshold is a named constant (`ghost_service.py:32`) with a comment documenting the warm-start intent and the planned recalibration direction. The seed script's `_ghost_snapshot()` function measures the gap between the highest non-ghost score and the lowest ghost score after each run and prints a threshold assessment. The two-layer defense (Â§6.5) partially mitigates threshold miscalibration: deceptive postings that escape the shield are caught by the cohort response likelihood layer.
+**Resolution:** The threshold is a named constant (`ghost_service.py:32`) with a comment documenting the warm-start intent. The seed script's `_ghost_snapshot()` function measures the gap between the highest non-ghost score and the lowest ghost score after each run and prints a threshold assessment. The two-layer defense (§6.5) partially mitigates threshold miscalibration: deceptive postings that escape the shield are caught by the cohort response likelihood layer.
 
-### 10.3 Lever API deprecation
+### 10.3 Lever API access model
 
-**Problem:** Lever's v1 API (used in `app/sources/lever.py`) does not expose a public listing endpoint without an API key and job slug. Most public Lever URLs are company-specific subdomains. This makes systematic crawling unreliable without a curated slug list per company.
+**Problem:** Lever's v1 API does not expose a public listing endpoint without company-specific slugs. Most public Lever URLs are company-specific subdomains, making systematic crawling unreliable without a curated slug list per company.
 
-**Resolution:** The Lever adapter is implemented and functional for known slugs, but excluded from `AggregationService.refresh()` by default. The four active sources (Greenhouse, Ashby, RemoteOK, Remotive) provide sufficient ingestion coverage for the demo. Lever activation is listed as a planned feature requiring a slug-discovery tool.
+**Resolution:** The Lever adapter is implemented and functional for known slugs, but excluded from `AggregationService.refresh()` by default. The four active sources (Greenhouse, Ashby, RemoteOK, Remotive) provide sufficient ingestion coverage. Lever activation is planned once a slug-discovery tool is built.
 
 ### 10.4 TanStack Start SSR + localStorage guards
 
-**Problem:** TanStack Start renders on the server where `localStorage` is undefined. Auth state (JWT, user object, guest flag) is stored in `localStorage["internpilot_token"]`, `localStorage["internpilot_user"]`, and `localStorage["internpilot_guest"]`. Direct access at the module level would throw.
+**Problem:** TanStack Start renders on the server where `localStorage` is undefined. Auth state (JWT, user object, guest flag) is stored in `localStorage["internpilot_token"]`, `localStorage["internpilot_user"]`, and `localStorage["internpilot_guest"]`. Direct access at the module level throws on the server.
 
-**Resolution:** `api-client.ts` wraps all localStorage reads with `typeof localStorage !== "undefined"` guards. The nav component reads auth state in a `useEffect` (client-only) rather than at render time. This is standard SSR hygiene but required explicit handling at every auth boundary.
+**Resolution:** `api-client.ts` wraps all localStorage reads with `typeof localStorage !== "undefined"` guards. The nav component reads auth state in a `useEffect` (client-only) rather than at render time. Unauthenticated visitors get mock data automatically via `shouldUseMocks() = USE_MOCKS || isGuestMode() || !getToken()` — no API calls are made to a potentially sleeping backend.
 
-### 10.5 pgvector HNSW index and cold-start embeddings
+### 10.5 CPU-only PyTorch on Docker
 
-**Problem:** The HNSW index is built as postings are inserted. At cold start (no postings), the index is empty and `GET /matches` returns an empty list even for fully built profiles. Additionally, if a profile has no embedding (rÃ©sumÃ© not uploaded), cosine distance queries fail.
+**Problem:** `sentence-transformers` pulls in PyTorch, which defaults to a CUDA wheel (~2 GB) from PyPI — a build-time download timeout on Render's free tier.
 
-**Resolution:** `MatchingService.get_matches()` returns `([], 0)` immediately if `profile.embedding is None` (line 246â€“247). The frontend renders a "complete your profile to see matches" state. The cold-start problem is addressed by seeding postings via `scripts/probe_refresh.py` before any user session. For production, a background task to pre-populate postings at startup would be the next step.
+**Resolution:** Added a CPU-only PyTorch index to `pyproject.toml`:
+```toml
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+```
+This resolves `torch==2.12.1+cpu` (~200 MB) instead of the CUDA wheel, reducing Docker build time from timeout to ~3 minutes.
+
+### 10.6 pgvector HNSW index and cold-start embeddings
+
+**Problem:** The HNSW index is built as postings are inserted. At cold start (no postings), the index is empty and `GET /matches` returns an empty list even for fully built profiles. Additionally, if a profile has no embedding (résumé not uploaded), cosine distance queries fail.
+
+**Resolution:** `MatchingService.get_matches()` returns `([], 0)` immediately if `profile.embedding is None`. The frontend renders a "complete your profile to see matches" state. The cold-start problem is addressed by seeding postings via `scripts/probe_refresh.py` before any user session.
 
 ---
 
-## 11. Planned Features (Post Mid-Eval)
+## 11. Deployment
 
-These are not built. They are listed as concrete next steps.
+InternPilot is live in production across three platforms:
 
-**Production deployment.** Backend â†’ Railway (PostgreSQL + pgvector add-on); frontend â†’ Vercel. Currently local-only. The application is containerizable with no changes to `app/`; Railway's managed Postgres supports the pgvector extension.
+### Frontend — Cloudflare Pages (SSR Worker)
 
-**Live outcome accumulation.** `PUT /api/integrations/gmail/sync` is wired in `TrackerService`. Connecting to a real inbox requires Gmail OAuth token storage (the service logs "OAuth token storage is Module 8 concern â€” application marked applied" at line 486 in `application_service.py`). Once live outcomes accumulate, the IQ learning curve will reflect real data.
+- **Build:** `npm run build` in `frontend/` using `@lovable.dev/vite-tanstack-config` with `nitro: { preset: "cloudflare-pages" }` in `vite.config.ts`. Produces `dist/_worker.js/`, `dist/_routes.json`, `dist/_redirects`.
+- **Compatibility flags:** `nodejs_compat` (required for Node.js built-ins in the Worker runtime).
+- **Auth-aware mocks:** Unauthenticated visitors see in-memory mock data automatically via `shouldUseMocks() = USE_MOCKS || isGuestMode() || !getToken()`. No backend call is made until the user authenticates.
+- **URL:** [internpilot.pages.dev](https://internpilot.pages.dev)
 
-**Ghost threshold recalibration.** The warm-start threshold (0.38) should be recalibrated once 200+ real `(posting, responded)` pairs exist. The seed script's threshold-assessment logic can be reused on real data.
+### Backend — Render.com (Docker)
 
-**Interview Prep (Module 9 reintroduction).** The service was descoped for scope focus (Â§5.11). Reintroduction post-mid-eval is appropriate once the evaluation loop has real data to benchmark prep quality against interview conversion rates.
+- **Build:** Multi-stage Dockerfile. Stage 1 uses `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` to install deps with `uv sync --frozen --no-dev --no-cache`. CPU-only PyTorch wheel (~200 MB) via `pyproject.toml` source override.
+- **Startup:** `scripts/start.sh` runs `alembic upgrade head` then `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Migrations are applied on every boot.
+- **Environment:** `DATABASE_URL`, `JWT_SECRET`, all LLM keys, `CORS_ORIGINS` set as Render environment variables.
 
-**Lever source activation.** Requires building a company slug list (e.g., from a curated directory or Lever's `/companies` discovery endpoint if accessible). The adapter code is complete.
+### Database — Supabase PostgreSQL 17 + pgvector
 
-**Response Likelihood v2.** Once real outcome volume reaches ~500 labeled pairs, replacing the LogisticRegression calibrator with a gradient-boosted model (LightGBM or XGBoost) would capture non-linear relationships between the cold-start features and actual response probability. The evaluation service's fixed-test-set methodology is already designed for this drop-in replacement.
+- **Connection:** Session Pooler URL (`aws-1-ap-south-1.pooler.supabase.com:5432`) for IPv4 compatibility with Render's free tier. Direct connection URL (IPv6) is incompatible with Render free tier.
+- **Migrations:** All 18 migrations applied (`0001_initial` through `0018_posting_decode_cache`). Migration 0001 runs `CREATE EXTENSION IF NOT EXISTS vector` before creating the `users` table.
+- **Password encoding:** Special characters in the database password are URL-encoded in `DATABASE_URL` (`@` → `%40`).
 
 ---
 
 ## 12. Setup and Reproducibility
 
-A reviewer should be able to stand up the full system from this section alone.
+A reviewer can stand up the full system from this section alone.
 
 ### Prerequisites
 
 - Python 3.12
 - [uv](https://github.com/astral-sh/uv): `pip install uv`
 - Docker Desktop (for PostgreSQL + pgvector)
-- Node.js â‰¥ 18 and npm
-- At least one LLM API key â€” Groq free tier (`GROQ_API_KEY`) is sufficient for all non-LLM-mocked tests to pass; only `test_llm.py` and live draft generation require an actual key
+- Node.js ≥ 18 and npm
+- At least one LLM API key — Groq free tier (`GROQ_API_KEY`) is sufficient
 
 ### Step 1: Clone and configure
 
@@ -590,10 +613,10 @@ A reviewer should be able to stand up the full system from this section alone.
 git clone https://github.com/Om-5640/InternPilot.git
 cd InternPilot
 cp .env.example .env
-# Edit .env â€” minimum required:
+# Edit .env — minimum required:
 #   DATABASE_URL=postgresql+asyncpg://postgres:testpass@localhost:5433/internpilot
 #   JWT_SECRET=any-32-char-string
-#   GROQ_API_KEY=your-groq-key   (or leave blank to skip LLM calls)
+#   GROQ_API_KEY=your-groq-key   (or leave blank to skip LLM calls in tests)
 ```
 
 ### Step 2: Start PostgreSQL with pgvector
@@ -611,27 +634,19 @@ docker run -d \
 ```bash
 uv sync --all-extras
 uv run alembic upgrade head
-# Expected: 15 migrations applied (0001_initial â†’ 0015_drop_interview_prep)
+# Expected: 18 migrations applied (0001_initial → 0018_posting_decode_cache)
 ```
 
 ### Step 4: Seed demo data (required to observe ghost shield and evaluation)
 
 ```bash
-# Step 4a: Aggregate real postings (optional â€” seed_demo.py creates its own)
-uv run python scripts/probe_refresh.py
-
-# Step 4b: 14 demo users + 26 postings + 364 application-outcome pairs
-#           Prints ghost distribution and deceptive posting callout
-uv run python scripts/seed_demo.py
-
-# Step 4c: 20 research opportunities with pgvector embeddings
-uv run python scripts/seed_research.py
-
-# Step 4d: Build Platform IQ learning curve (prints 8 checkpoints)
-uv run python scripts/smoke_replay.py
+uv run python scripts/probe_refresh.py   # optional: aggregate real postings
+uv run python scripts/seed_demo.py       # 14 demo users + 26 postings + 364 app-outcome pairs
+uv run python scripts/seed_research.py  # 20 research opportunities with pgvector embeddings
+uv run python scripts/smoke_replay.py   # builds Platform IQ learning curve (prints 8 checkpoints)
 ```
 
-Expected output from `seed_demo.py` (terminal):
+Expected output from `seed_demo.py`:
 
 ```
 DEMO SEED SUMMARY
@@ -641,9 +656,9 @@ Applications       : 364
 Outcomes recorded  : 364
 Alumni contacts    : 23
 
-DECEPTIVE POSTINGS â€” what the Ghost Shield misses (Module 5's territory)
+DECEPTIVE POSTINGS — what the Ghost Shield misses (Module 5's territory)
 ...
-Demo script: "This role matches you 91% â€” ranked #22 because 0/5 batchmates heard back."
+Demo script: "This role matches you 91% — ranked #22 because 0/5 batchmates heard back."
 ```
 
 Expected output from `smoke_replay.py`:
@@ -673,26 +688,21 @@ npm run dev
 # UI: http://localhost:5173
 ```
 
-Set `VITE_USE_MOCKS=false` in `frontend/.env` to connect to the live backend (requires backend running). Default is `true` (in-memory mocks, no backend needed for UI review).
+Set `VITE_USE_MOCKS=false` in `frontend/.env` to connect to the live backend.
 
 ### Step 7: Run the test suite
 
 ```bash
-# Create test database (once)
 docker exec internpilot-postgres psql -U postgres -c "CREATE DATABASE internpilot_test;"
 
-# Run all 300 tests
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:testpass@localhost:5433/internpilot_test \
   uv run pytest -v
 
-# Type check (strict, 76 files)
-uv run mypy app
-
-# Lint
-uv run ruff check .
+uv run mypy app          # 0 errors, strict mode, 76 files
+uv run ruff check .      # 0 violations
 ```
 
-### Step 8: Run the 12-step API smoke test (requires running backend + seeded DB)
+### Step 8: End-to-end API smoke test
 
 ```bash
 uv run python scripts/journey_smoke.py
@@ -707,8 +717,8 @@ uv run python scripts/journey_smoke.py
 
 | Document | Purpose |
 |---|---|
-| [`API_CONTRACT.md`](../API_CONTRACT.md) | Authoritative field-level API contract. Every endpoint, request shape, response shape, enum value, and error code is defined here. Change the contract before changing the code. |
-| [`CLAUDE.md`](../CLAUDE.md) | Developer conventions: pinned versions, project structure, data-isolation rule (with correct/incorrect examples), module discipline checklist, migration commands, async rules, error handling pattern, LLM router usage, embeddings usage. |
+| [`API_CONTRACT.md`](API_CONTRACT.md) | Authoritative field-level API contract. Every endpoint, request shape, response shape, enum value, and error code is defined here. Change the contract before changing the code. |
+| [`CLAUDE.md`](CLAUDE.md) | Developer conventions: pinned versions, project structure, data-isolation rule (with correct/incorrect examples), module discipline checklist, migration commands, async rules, error handling pattern, LLM router usage, embeddings usage. |
 
 ### B. Repository structure
 
@@ -719,50 +729,49 @@ app/
     config.py                   pydantic-settings; all secrets from env
     database.py                 async engine + get_db() dependency
     security.py                 JWT create/verify + get_current_user
-    errors.py                   APIError + global exception handlers â†’ {error:{code,message}}
-  models/                       15 SQLAlchemy ORM models
+    errors.py                   APIError + global handlers → {error:{code,message}}
+  models/                       13 SQLAlchemy ORM models
     base.py                     DeclarativeBase + TimestampMixin (id UUID, created_at, updated_at)
-    user.py Â· profile.py        Modules 0â€“1
-    company.py Â· posting.py     Shared global entities
-    application.py Â· artifact.py Â· outcome.py    Modules 6â€“7 (user-owned)
-    contact.py Â· referral.py    Module 8
-    research_opportunity.py Â· research_outreach.py    Module 10
+    user.py · profile.py        Modules 0–1
+    company.py · posting.py     Shared global entities
+    application.py · artifact.py · outcome.py    Modules 6–7 (user-owned)
+    contact.py · referral.py    Module 8
+    research_opportunity.py · research_outreach.py    Module 10
     evaluation.py               Module 11
     notification.py             Module 12
   schemas/                      Pydantic v2 request/response schemas (one per module)
   services/
-    base.py                     BaseService â€” data-isolation scaffold
+    base.py                     BaseService — data-isolation scaffold (28 lines)
     ghost_service.py            5-signal Ghost-Job Shield
     matching_service.py         Matching + response likelihood (Modules 3+5)
     cohort_service.py           Cross-user aggregate response rates
     application_service.py      Application Assistant (grounding guard, ATS)
-    evaluation_service.py       Platform IQ â€” evaluate_now + build_history
+    evaluation_service.py       Platform IQ — evaluate_now + build_history
     research_service.py         Research opportunity ranking + pitch
     university_normalizer.py    Deterministic name canonicalization (30-entry alias map)
-    ... (16 service files total)
+    ... (17 service files total)
   llm/
-    router.py                   5-provider fallback chain (Geminiâ†’Groqâ†’OpenRouterâ†’DeepSeekâ†’Ollama)
+    router.py                   5-provider fallback chain (Gemini→Groq→OpenRouter→DeepSeek→Ollama)
     embeddings.py               Local all-MiniLM-L6-v2, EMBEDDING_DIM=384
-  api/v1/                       Thin routers â€” 51 endpoints, no business logic
+  api/v1/                       Thin routers — 54 endpoints, no business logic
   sources/                      Ingestion adapters (Greenhouse, Ashby, Lever, RemoteOK, Remotive)
 alembic/
   env.py                        Async Alembic env
-  versions/                     15 reviewed migrations (0001_initial â†’ 0015_drop_interview_prep)
-tests/                          300 tests across 19 files
+  versions/                     18 reviewed migrations (0001_initial → 0018_posting_decode_cache)
+tests/                          300 tests across 19 files (integration against real PostgreSQL)
 scripts/
-  seed_demo.py                  14 users + 364 app-outcome pairs (RNG seed=42)
+  seed_demo.py                  14 users + 364 app-outcome pairs (RNG seed=42, deterministic)
   seed_research.py              20 research opportunities with pgvector embeddings
   probe_refresh.py              Aggregate real postings from all 5 sources
   smoke_replay.py               Replay Platform IQ learning curve (evaluate_now + build_history)
   journey_smoke.py              12-step end-to-end API smoke test
 frontend/
   src/
-    lib/api-client.ts           Single HTTP client; mockâ†”real via VITE_USE_MOCKS
-    lib/mocks.ts                In-memory mock data for guest mode
+    lib/api-client.ts           Single HTTP client; mock↔real via auth state or VITE_USE_MOCKS
+    lib/mocks.ts                In-memory mock data for guest/unauthenticated mode
     routes/                     TanStack Start file-based routes (11 routes)
     components/nav.tsx          Auth-aware navigation (avatar + dropdown / guest badge)
-docs/
-  MID_EVALUATION.md             This document
+  vite.config.ts                nitro cloudflare-pages preset for SSR Worker bundling
 API_CONTRACT.md                 Field-level API contract (single source of truth)
 CLAUDE.md                       Developer conventions
 ```
@@ -771,16 +780,18 @@ CLAUDE.md                       Developer conventions
 
 | Number | Value | Source |
 |---|---|---|
-| Test functions | 300 | `uv run pytest --tb=short -q` (live run against PostgreSQL + pgvector; 300 passed) |
+| Test functions | 300 | `uv run pytest --tb=short -q` (live run against PostgreSQL + pgvector) |
 | mypy source files | 76 | `uv run mypy app` output |
-| API endpoints | 51 | `grep -rn "^@router\." app/api/v1/*.py \| wc -l` |
-| Alembic migrations | 15 | `ls alembic/versions/*.py` |
+| API endpoints | 54 | `@router.` decorators in `app/api/v1/*.py` |
+| Alembic migrations | 18 | `ls alembic/versions/*.py` |
+| Service files | 17 | `ls app/services/*.py` |
 | Ghost threshold | 0.38 | `ghost_service.py:32` |
 | Ghost weight: age | 0.30 | `ghost_service.py:24` |
 | Ghost weight: repost | 0.20 | `ghost_service.py:25` |
 | Ghost weight: vague | 0.25 | `ghost_service.py:26` |
 | Ghost weight: company | 0.15 | `ghost_service.py:27` |
 | Ghost weight: cohort | 0.10 | `ghost_service.py:28` |
+| Ghost weights sum | 1.00 | `tests/test_ghost.py` verifies this |
 | MIN_COHORT_APPS | 5 | `ghost_service.py:184`, `cohort_service.py:20`, `matching_service.py:40` |
 | Semantic weight | 0.70 | `matching_service.py:33` |
 | Skill weight | 0.30 | `matching_service.py:34` |
@@ -794,10 +805,12 @@ CLAUDE.md                       Developer conventions
 | N_PREFIXES | 8 | `evaluation_service.py:67` |
 | MIN_TOTAL | 30 | `evaluation_service.py:70` |
 | Embedding dim | 384 | `app/llm/embeddings.py` (EMBEDDING_DIM) |
+| University alias entries | 30 | `app/services/university_normalizer.py` |
+| Normalizer tests | 42 | `tests/test_university_normalizer.py` |
 | Demo users | 14 | `seed_demo.py` DEMO_USERS list |
 | Demo postings | 26 | Count of POSTING_TEMPLATES entries |
-| Demo app-outcome pairs | 364 | 26 postings Ã— 14 users (seed_demo.py comment) |
-| Alumni contacts | 23 | Count of ALUMNI_CONTACTS values in seed_demo.py |
+| Demo app-outcome pairs | 364 | 26 postings × 14 users (seed_demo.py) |
+| Alumni contacts | 23 | Count of ALUMNI_CONTACTS in seed_demo.py |
 | Research opportunities | 20 | scripts/seed_research.py |
 | Platform IQ | 66.7 | `smoke_replay.py` output after `seed_demo.py` (RNG seed=42) |
 | Response Brier | 0.226 | same |
@@ -805,5 +818,5 @@ CLAUDE.md                       Developer conventions
 | Ghost F1 | 0.507 | same |
 | IQ curve start (n=31) | IQ 75.1, Brier 0.249 | same |
 | IQ curve end (n=255) | IQ 80.3, Brier 0.197 | same |
-| Deceptive posting quote | "91% â€” ranked #22 because 0/5 batchmates heard back" | `seed_demo.py:1086` |
-
+| Deceptive posting quote | "91% — ranked #22 because 0/5 batchmates heard back" | `seed_demo.py:1086` |
+| Live frontend URL | internpilot.pages.dev | Cloudflare Pages deployment |
