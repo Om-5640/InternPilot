@@ -19,6 +19,7 @@ dependencies = [
     "google-generativeai>=0.8.0",
     "groq>=0.13.0",
     "openai>=1.58.0",
+    "torch",
     "sentence-transformers>=3.3.0",
     "python-multipart>=0.0.20",
     "email-validator>=2.2.0",
@@ -33,6 +34,18 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# ---------------------------------------------------------------------------
+# Force CPU-only PyTorch — no GPU needed for sentence-transformers embeddings.
+# CPU wheel is ~200 MB vs ~2 GB for the default CUDA wheel.
+# ---------------------------------------------------------------------------
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
