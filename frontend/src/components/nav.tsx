@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Compass, LogOut, User, ChevronDown } from "lucide-react";
+import { Compass, LogOut, User, ChevronDown, Github } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { getStoredUser, authLogout, isGuestMode, type User as AppUser } from "@/lib/api-client";
 
@@ -174,8 +174,17 @@ export function Footer() {
           </ul>
         </div>
       </div>
-      <div className="mx-auto max-w-7xl px-6 pb-10 text-xs text-muted-foreground flex justify-between">
+      <div className="mx-auto max-w-7xl px-6 pb-10 text-xs text-muted-foreground flex items-center justify-between">
         <span>© 2026 InternPilot</span>
+        <a
+          href="https://github.com/Om-5640/InternPilot"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
+        >
+          <Github className="h-3.5 w-3.5" />
+          GitHub
+        </a>
         <span className="font-mono">v0.9 · platform IQ rising</span>
       </div>
     </footer>
