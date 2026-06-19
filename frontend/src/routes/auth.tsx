@@ -4,7 +4,7 @@ import { Compass, ArrowRight, UserRound } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { authLogin, authSignup, authGoogleLogin, setGuestMode } from "@/lib/api-client";
 
-const GOOGLE_CLIENT_ID = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Sign in — InternPilot" }, { name: "description", content: "Sign in to InternPilot." }] }),

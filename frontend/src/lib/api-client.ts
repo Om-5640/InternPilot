@@ -17,10 +17,10 @@ import {
 
 export type { User } from "./mocks";
 
-export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL ?? "/api";
+export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL || "/api";
 // Mocks are opt-in: only enabled when VITE_USE_MOCKS is explicitly "true" or "1".
 // Empty string, undefined, or any other value keeps the real backend active.
-const _mockFlag = String((import.meta as any).env?.VITE_USE_MOCKS ?? "").toLowerCase();
+const _mockFlag = String(import.meta.env.VITE_USE_MOCKS ?? "").toLowerCase();
 const USE_MOCKS = _mockFlag === "true" || _mockFlag === "1";
 
 // ---------------------------------------------------------------------------
