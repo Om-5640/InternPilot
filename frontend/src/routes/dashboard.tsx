@@ -180,7 +180,10 @@ function Row({ company, rate, note }: { company: string; rate: string; note: str
 function IQChart({ points }: { points: { date: string; value: number }[] }) {
   const w = 600, h = 200, pad = 24;
   const max = 80;
-  const xs = (i: number) => pad + (i * (w - pad * 2)) / (points.length - 1);
+  if (points.length === 0) {
+    return <div className="mt-6 h-56 flex items-center justify-center text-xs text-muted-foreground">No data yet — apply to some roles to see your IQ trend.</div>;
+  }
+  const xs = (i: number) => points.length === 1 ? w / 2 : pad + (i * (w - pad * 2)) / (points.length - 1);
   const ys = (v: number) => h - pad - ((v / max) * (h - pad * 2));
   const path = points.map((p, i) => `${i ? "L" : "M"} ${xs(i)} ${ys(p.value)}`).join(" ");
   const area = `${path} L ${xs(points.length - 1)} ${h - pad} L ${pad} ${h - pad} Z`;

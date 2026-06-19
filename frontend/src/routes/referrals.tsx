@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { CalmBackground } from "@/components/live-background";
 import { Nav } from "@/components/nav";
 import { api, useApi } from "@/lib/api-client";
 import { Pill } from "@/components/ui-bits";
 import { LoadingState, ErrorState, EmptyState } from "@/components/data-states";
-import { Send, Linkedin, RefreshCw, Pencil } from "lucide-react";
+import { Send, Linkedin, RefreshCw, Pencil, Sparkles } from "lucide-react";
 import type { Contact, Referral } from "@/lib/mocks";
 
 export const Route = createFileRoute("/referrals")({
@@ -130,7 +130,7 @@ function Referrals() {
     () => api.getReferralCandidates(posting_id),
     [posting_id],
   );
-  // Always load existing referral records (for the intro panel action)
+  // Always load existing referral records
   const { data: referrals, loading: rLoad, error: rErr, reload: rReload } = useApi(
     () => api.getReferrals(),
     [],
@@ -140,14 +140,51 @@ function Referrals() {
   const error = isCandidateMode ? cErr : rErr;
   const reload = isCandidateMode ? cReload : rReload;
 
-  // Unified contact list: either direct candidates or contacts extracted from referral records
+  // Unified contact list
   const contacts: Contact[] = isCandidateMode
     ? (candidates ?? [])
     : (referrals ?? []).map((r) => r.contact);
 
-  // The active referral for the first contact (used by the send button)
-  const activeReferral: Referral | undefined = referrals?.[0];
-  const firstContact = contacts[0];
+  // Track selected contact and per-contact creating state
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [creating, setCreating] = useState<Set<string>>(new Set());
+  const [localReferrals, setLocalReferrals] = useState<Referral[]>([]);
+
+  // Sync local referrals when server data arrives
+  useEffect(() => {
+    if (referrals) setLocalReferrals(referrals);
+  }, [referrals]);
+
+  // Auto-select first contact when list loads
+  useEffect(() => {
+    if (contacts.length > 0 && !selectedContactId) {
+      setSelectedContactId(contacts[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts.length]);
+
+  const allReferrals = localReferrals;
+  const selectedContact = contacts.find((c) => c.id === selectedContactId) ?? contacts[0];
+  const activeReferral: Referral | undefined = allReferrals.find(
+    (r) => r.contact.id === (selectedContact?.id),
+  );
+
+  const handleDraftIntro = async (c: Contact) => {
+    setSelectedContactId(c.id);
+    const existingRef = allReferrals.find((r) => r.contact.id === c.id);
+    if (existingRef) return; // already exists — just select it
+    if (creating.has(c.id)) return;
+    setCreating((prev) => new Set(prev).add(c.id));
+    try {
+      const newRef = await api.createReferral(c.company_id, c.id, posting_id);
+      setLocalReferrals((prev) => [...prev.filter((r) => r.contact.id !== c.id), newRef]);
+      rReload();
+    } catch (e) {
+      console.error("Failed to create referral:", e);
+    } finally {
+      setCreating((prev) => { const s = new Set(prev); s.delete(c.id); return s; });
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -178,38 +215,59 @@ function Referrals() {
             <div className="grid gap-6 md:grid-cols-[1fr_1.4fr]">
               <div className="space-y-4">
                 {contacts.map((c) => {
-                  const linkedReferral = referrals?.find((r) => r.contact.id === c.id);
+                  const linkedReferral = allReferrals.find((r) => r.contact.id === c.id);
+                  const isSelected = c.id === selectedContact?.id;
+                  const isCreating = creating.has(c.id);
                   return (
-                    <div key={c.id} className="card-soft card-lift p-5 flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-full grid place-items-center font-display text-lg"
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedContactId(c.id)}
+                      className="card-soft card-lift p-5 flex items-center gap-4 cursor-pointer transition-all"
+                      style={isSelected ? { outline: "2px solid var(--color-primary)", outlineOffset: "2px" } : {}}
+                    >
+                      <div className="h-12 w-12 rounded-full grid place-items-center font-display text-lg shrink-0"
                            style={{ background: "var(--color-primary-tint)", color: "var(--color-primary)" }}>
                         {c.name.split(" ").map((s) => s[0]).join("")}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium">{c.name}</div>
                         <div className="text-xs text-muted-foreground">{c.role} · {c.university} '{String(c.grad_year).slice(2)}</div>
-                        <div className="mt-2 flex gap-1.5">
+                        <div className="mt-2 flex gap-1.5 flex-wrap">
                           <Pill tone="primary">{relationshipLabel[c.relationship]}</Pill>
                           {linkedReferral && <Pill>{linkedReferral.status}</Pill>}
                         </div>
                       </div>
-                      <a
-                        href={c.linkedin}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`Open ${c.name} on LinkedIn`}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <Linkedin className="h-4 w-4" />
-                      </a>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={c.linkedin}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Open ${c.name} on LinkedIn`}
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Linkedin className="h-4 w-4" />
+                        </a>
+                        {!linkedReferral && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDraftIntro(c); }}
+                            disabled={isCreating}
+                            className="inline-flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-3 py-1 text-[11px] font-medium hover:bg-[color:var(--primary-hover)] disabled:opacity-60"
+                            aria-label={`Draft intro for ${c.name}`}
+                          >
+                            {isCreating ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                            {isCreating ? "Drafting…" : "Draft intro"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
 
-              {firstContact && (
+              {selectedContact && (
                 <IntroDraftPanel
-                  contact={firstContact}
+                  contact={selectedContact}
                   referral={activeReferral}
                 />
               )}

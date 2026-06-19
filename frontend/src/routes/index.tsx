@@ -94,10 +94,11 @@ function FloatingMatchCard() {
   // Without a token the backend returns 401 and the old code would hard-redirect to /auth.
   const authenticated =
     typeof localStorage !== "undefined" ? !!getToken() || isGuestMode() : false;
-  const { data } = useApi(
-    () => (authenticated ? api.getMatches() : Promise.resolve([])),
+  const { data: result } = useApi(
+    () => (authenticated ? api.getMatches() : Promise.resolve({ items: [], fetching: false })),
     [authenticated],
   );
+  const data = result?.items;
   const m = data?.[0];
   const ghost = data?.find((x) => x.is_ghost);
   if (!m) return null;

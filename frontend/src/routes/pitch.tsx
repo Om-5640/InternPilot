@@ -17,7 +17,8 @@ export const Route = createFileRoute("/pitch")({
 
 function Pitch() {
   const { opportunity_id } = Route.useSearch();
-  const { data: list, loading, error, reload } = useApi(() => api.getResearchOpportunities(), []);
+  const { data: result, loading, error, reload } = useApi(() => api.getResearchOpportunities(), []);
+  const list = result?.items;
   const o = list?.find((x) => x.id === opportunity_id) ?? list?.[0];
 
   return (

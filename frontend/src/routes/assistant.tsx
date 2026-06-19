@@ -58,7 +58,8 @@ function stripHtml(html: string): string {
 
 function Assistant() {
   const { posting_id } = Route.useSearch();
-  const { data: matches, loading, error, reload } = useApi(() => api.getMatches(), []);
+  const { data: result, loading, error, reload } = useApi(() => api.getMatches(), []);
+  const matches = result?.items;
 
   const m: Match | undefined =
     matches?.find((x) => x.posting.id === posting_id) ?? matches?.[0];

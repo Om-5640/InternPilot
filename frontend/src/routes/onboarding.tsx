@@ -91,6 +91,7 @@ function OnboardingInner({ initialProfile }: { initialProfile: Profile }) {
   const [resumeUploading, setResumeUploading] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumeDone, setResumeDone] = useState(hasResumeData);
+  const [extractedSummary, setExtractedSummary] = useState<string | null>(null);
 
   // GitHub state
   const [githubConnecting, setGithubConnecting] = useState(false);

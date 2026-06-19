@@ -747,6 +747,26 @@ export const api = {
     }
     await delay(); return _referrals;
   },
+  async createReferral(company_id: string, contact_id: string, posting_id?: string): Promise<Referral> {
+    if (!shouldUseMocks()) {
+      const body: Record<string, string> = { company_id, contact_id };
+      if (posting_id) body.posting_id = posting_id;
+      const raw = await http<any>("/referrals", { method: "POST", body: JSON.stringify(body) });
+      return mapReferral(raw?.referral ?? raw);
+    }
+    await delay(80);
+    const newRef: Referral = {
+      id: String(Date.now()),
+      posting_id: posting_id ?? "",
+      company_id,
+      contact: contacts.find((c) => c.id === contact_id) ?? contacts[0],
+      status: "suggested",
+      intro_artifact_id: null,
+      created_at: new Date().toISOString(),
+    };
+    _referrals = [..._referrals, newRef];
+    return newRef;
+  },
   async setReferralStatus(id: string, status: Referral["status"]): Promise<Referral | undefined> {
     if (!shouldUseMocks()) {
       const raw = await http<any>(`/referrals/${id}`, {
