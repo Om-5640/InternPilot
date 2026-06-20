@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CalmBackground } from "@/components/live-background";
 import { Nav } from "@/components/nav";
 import { api, useApi } from "@/lib/api-client";
@@ -116,22 +117,73 @@ function Outreach() {
 
 function StatusPicker({ status, onChange }: { status: ResearchOutreachStatus; onChange: (s: ResearchOutreachStatus) => void }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
   const tone = TONE[status];
   const label = STATUSES.find((s) => s.k === status)?.label ?? status;
 
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 6, left: r.left, width: r.width });
+    }
+    setOpen((o) => !o);
+  };
+
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (btnRef.current && !btnRef.current.contains(e.target as Node)) setOpen(false);
     };
-    if (open) document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
+  const menu = open && createPortal(
+    <div
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        width: Math.max(pos.width, 176),
+        zIndex: 9999,
+        borderColor: "var(--color-hairline)",
+        boxShadow: "0 8px 28px -4px rgb(0 0 0 / 0.14)",
+      }}
+      className="rounded-2xl border bg-white py-1.5"
+      role="listbox"
+    >
+      {STATUSES.map((s) => {
+        const isCurrent = s.k === status;
+        const isAllowed = ALLOWED_NEXT[status].has(s.k);
+        const disabled = !isCurrent && !isAllowed;
+        const t = TONE[s.k];
+        return (
+          <button
+            key={s.k}
+            role="option"
+            aria-selected={isCurrent}
+            disabled={disabled}
+            onClick={() => { if (!disabled && !isCurrent) onChange(s.k); setOpen(false); }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
+              isCurrent ? "font-medium" : disabled ? "opacity-30 cursor-not-allowed" : "hover:bg-secondary cursor-pointer"
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ background: t.fg }} />
+            <span className="flex-1 text-left" style={{ color: isCurrent ? t.fg : undefined }}>{s.label}</span>
+            {isCurrent && <Check className="h-3 w-3 shrink-0" style={{ color: t.fg }} />}
+          </button>
+        );
+      })}
+    </div>,
+    document.body,
+  );
+
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        ref={btnRef}
+        onClick={toggle}
         className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] transition-opacity hover:opacity-90"
         style={{ background: tone.bg, color: tone.fg }}
         aria-haspopup="listbox"
@@ -140,40 +192,7 @@ function StatusPicker({ status, onChange }: { status: ResearchOutreachStatus; on
         <span className="flex-1 text-left">{label}</span>
         <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-
-      {open && (
-        <div
-          className="absolute top-full mt-1.5 left-0 z-50 w-44 rounded-2xl border bg-white py-1.5 shadow-lg"
-          style={{ borderColor: "var(--color-hairline)", boxShadow: "0 8px 24px -4px rgb(0 0 0 / 0.12)" }}
-          role="listbox"
-        >
-          {STATUSES.map((s) => {
-            const isCurrent = s.k === status;
-            const isAllowed = ALLOWED_NEXT[status].has(s.k);
-            const disabled = !isCurrent && !isAllowed;
-            const t = TONE[s.k];
-            return (
-              <button
-                key={s.k}
-                role="option"
-                aria-selected={isCurrent}
-                disabled={disabled}
-                onClick={() => { if (!disabled && !isCurrent) { onChange(s.k); } setOpen(false); }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
-                  isCurrent ? "font-medium" : disabled ? "opacity-30 cursor-not-allowed" : "hover:bg-secondary cursor-pointer"
-                }`}
-              >
-                <span
-                  className="h-2 w-2 rounded-full shrink-0"
-                  style={{ background: t.fg }}
-                />
-                <span className="flex-1 text-left" style={{ color: isCurrent ? t.fg : undefined }}>{s.label}</span>
-                {isCurrent && <Check className="h-3 w-3 shrink-0" style={{ color: t.fg }} />}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {menu}
     </div>
   );
 }
