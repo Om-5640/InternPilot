@@ -207,7 +207,20 @@ JWT-based signup/login (argon2 password hash via passlib) plus Google OIDC. Toke
 
 ### 5.4 Module 2 — Ingestion
 
-Four active adapters (Greenhouse JSON API, Ashby GraphQL, RemoteOK REST, Remotive REST) plus a Lever slug-based adapter (excluded from default refresh loop — see §10). `AggregationService.refresh()` fetches each source, calls `_upsert_one()` per raw posting, and pipes through `GhostService.rescore_all()` at the end of each run. Deduplication uses `build_dedup_key(company, title, location)` (normalized, SHA-1 truncated to 64 chars) so the same role on two boards increments `source_sightings` rather than creating a duplicate row — directly feeding the Ghost Shield's repost signal without any cross-table join at read time.
+Eight adapters are implemented. `AggregationService.refresh()` fetches each active source, calls `_upsert_one()` per raw posting, and pipes through `GhostService.rescore_all()` at the end of each run. Deduplication uses `build_dedup_key(company, title, location)` (normalized, SHA-1 truncated to 64 chars) so the same role on two boards increments `source_sightings` rather than creating a duplicate row — directly feeding the Ghost Shield's repost signal without any cross-table join at read time.
+
+| Adapter | Type | Coverage | Key env var(s) |
+|---|---|---|---|
+| `greenhouse.py` | JSON API | Major tech companies | — (public) |
+| `ashby.py` | GraphQL | Mid-stage startups | — (public) |
+| `remoteok.py` | REST | Remote roles across industries | — (public) |
+| `remotive.py` | REST | Remote roles across industries | — (public) |
+| `lever.py` | Slug-based REST | Company-specific slugs | — (public, excluded from default refresh; see §10.3) |
+| `jsearch.py` | RapidAPI | LinkedIn, Indeed, Glassdoor aggregated | `JSEARCH_API_KEY` |
+| `usajobs.py` | USAJobs.gov REST | US federal internships (all fields, PATHWAYS/Co-op) | `USAJOBS_API_KEY`, `USAJOBS_EMAIL` |
+| `adzuna.py` | Adzuna REST | All industries, multi-country (us/gb/de/au/in/ca) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY`, `ADZUNA_COUNTRY` |
+
+Every source whose credentials are absent from the environment is silently skipped — the same pattern as the LLM fallback router. The three new sources (JSearch, USAJobs, Adzuna) expand coverage to non-tech domains (federal engineering, finance, healthcare, logistics) and aggregate boards that previously required separate accounts. An `interest_aggregation_service.py` provides a TTL-cached live fetch keyed on the user's `research_interests` text (migration 0019 adds the `interest_search_cache` table).
 
 ### 5.5 Module 4 — Ghost-Job Shield
 
@@ -270,11 +283,96 @@ At `create_application()` time, the current `predicted_response_prob` and `predi
 
 ### 5.9 Module 10 — Research Vertical
 
-Mirrors the internship matching stack for research opportunities. `ResearchService` ranks 20 seeded opportunities by `fit_score = 0.70 × cosine_sim(profile_embedding, opportunity_embedding) + 0.30 × skill_overlap` — the same blend as the main feed, but matching on `profile.research_interests` rather than `profile.skills`. Pitch generation uses the same Application Assistant whitelist + grounding guard. Research opportunities also carry a `recent_paper_url` field (migration 0017) to ground cold-email pitches in the PI's actual published work.
+Mirrors the internship matching stack for research opportunities. `ResearchService` ranks 20 seeded opportunities by `fit_score = 0.70 × cosine_sim(profile_embedding, opportunity_embedding) + 0.30 × skill_overlap` — the same blend as the main feed, but matching on `profile.research_interests` rather than `profile.skills`. Pitch generation uses the same Application Assistant whitelist + grounding guard. Research opportunities also carry a `recent_paper_url` field (migration 0017) to ground cold-email pitches in the PI's actual published work. Migration 0020 adds a unique index on `research_opportunities.url` to prevent duplicate upserts.
+
+**Outreach state machine (migration 0015_outreach_hardening).** Research outreach records now follow a validated state machine:
+
+```
+suggested → contacted → replied
+                     ↘ declined
+                     ↘ no_response
+```
+
+`OUTREACH_TRANSITIONS` (defined in `app/models/research_outreach.py`) declares the allowed next-states for every status. `update_status()` validates the transition before writing it and rejects disallowed moves with `422 INVALID_STATUS_TRANSITION`. `contacted_at` and `replied_at` timestamps are set automatically when the corresponding status is entered.
+
+Additional hardening in this module:
+- **Unique constraint** `UNIQUE(user_id, research_opportunity_id)` prevents duplicate outreach records per user per opportunity.
+- **Rate limiting** — `draft_pitch()` raises `429 RATE_LIMIT_EXCEEDED` after 5 pitches per user per hour (tracked by `contacted_at` timestamps within the rolling window).
+- **Orphaned artifact GC** — if a `ResearchOutreach` row is deleted, its attached `Artifact` is removed in the same transaction.
+- **Paginated list** — `list_outreach()` returns `(items, total)` tuples; the API exposes `?page=` and `?limit=` query parameters.
+- **Stale warning** — outreach rows untouched for > 30 days gain `is_stale: True` in the API response.
+
+### 5.9b Module 7 — Tracker Hardening
+
+Several correctness issues were addressed in `tracker_service.py` and `tracker.tsx`:
+
+- **Duplicate outcome guard.** `record_outcome()` now queries for an existing `Outcome` on the same `application_id` before inserting. A second call returns `409 OUTCOME_ALREADY_RECORDED` rather than silently creating a second row.
+- **Word-boundary matching in follow-up drafts.** `draft_followup()` uses `re.search(r"\b" + re.escape(word) + r"\b", text_lower)` to verify that the company name and job title appear in the draft. This prevents false positives where a short term (e.g. "AI") matches as a substring of a longer word (e.g. "SAIL").
+- **Re-fetch after commit.** `create_application()` calls `await self.db.refresh(app)` after the commit so callers receive a fully-populated `Application` object including server-set defaults, rather than a stale in-memory object.
+- **Terminal status guard (frontend).** `tracker.tsx` defines `TERMINAL_STATUSES = new Set(["offer", "rejected", "ghosted"])`. Cards in these states are not advanced by the quick-action button and receive `aria-disabled`. The `advance()` function returns early on any terminal status before consulting the ordered status array, preventing nonsensical transitions like offer → rejected.
 
 ### 5.10 Modules 11 + 12 — Dashboard and Notifications
 
 `DashboardService` aggregates pipeline counts, response rate, ghosts avoided (postings with `is_ghost=True` in the user's application set), and time saved (estimated). It calls `EvaluationService.get_latest_formula()` and `get_history_rows()` to populate `platform_iq` and `iq_trend`. `NotificationService` generates four notification types idempotently — a `SET` of existing notification contents is checked before inserting to avoid duplicates across concurrent runs.
+
+### 5.11b Offline Matching Quality Eval — `EvalMatchingService`
+
+`app/services/eval_matching_service.py` implements an offline golden-set evaluation that runs with no DB, no live users, and no LLM — only the production sentence-transformer.
+
+**Golden set.** 4 archetypal student profiles × 8 archetypal research/internship opportunities = 32 hand-labeled (profile, opportunity) pairs with relevance 0–3:
+
+| Profile archetype | Peak opportunity | Design intent |
+|---|---|---|
+| `nlp_researcher` | `nlp_lab` | NLP profile should not match genomics or embedded systems |
+| `cv_researcher` | `cv_group` | CV profile should prefer CV group over general ML |
+| `fullstack_dev` | `saas_startup` | Developer profile is irrelevant to all research labs |
+| `bio_researcher` | `genomics_lab` | Bio profile should not match backend engineering |
+
+The `embedded_sys` opportunity has relevance=0 for every profile by design — an explicit test of the model's ability to reject clearly irrelevant roles.
+
+**Metrics computed per run.** For each profile, opportunities are ranked by the production `fit_score = SEMANTIC_WEIGHT × cosine_sim + SKILL_WEIGHT × skill_ratio`. Global metrics are the arithmetic mean across all four profiles:
+
+| Metric | Purpose |
+|---|---|
+| NDCG@3 | How good is the top-3 ranking (emphasises rank position, not just precision) |
+| NDCG@5 | Full top-5 ranking quality — the optimisation target |
+| Precision@3 | What fraction of the top-3 are relevant (relevance ≥ 1) |
+| MRR | Where is the first relevant result |
+
+**Weight grid-search.** Tries `SEMANTIC_WEIGHT` ∈ {0.40, 0.45, …, 0.90} (and `SKILL_WEIGHT = 1 − SEMANTIC_WEIGHT`) to find the pair maximising NDCG@5. Returns `optimal_weights`, `optimal_ndcg_at_5`, `weight_gain_pct`, and `weight_recommendation` as an explicit human-readable string.
+
+**Regression detection.** Stores the previous run's NDCG@5 in a module-level variable. Any drop > 2 pp sets `regression_detected = True` in the response.
+
+**Per-profile breakdown.** Each of the four profiles gets its own `ndcg_at_3`, `ndcg_at_5`, `precision_at_3`, `mrr`, `top_match_label`, and `top_match_is_correct` flag. A reviewer can immediately see which archetype the system handles least well.
+
+**Health field.** `"good"` when NDCG@5 ≥ 0.70, `"needs_attention"` otherwise.
+
+Admin endpoint: `POST /api/evaluation/matching`
+
+### 5.11c Live Grounding Score Calibration — `EvalGroundingService`
+
+`app/services/eval_grounding_service.py` answers one question: *does a higher `grounding_score` actually predict that a professor will reply?*
+
+**Data pipeline.** Joins `Artifact` rows of type `research_pitch` (where `grounding_score IS NOT NULL`) with `ResearchOutreach` via `pitch_artifact_id`. Only terminal-state rows are included:
+- `replied` / `accepted` → `responded = 1`
+- `declined` / `no_response` → `responded = 0`
+- Pending states (`suggested`, `drafted`, `contacted`) are excluded — outcome unknown.
+
+Requires ≥ 10 terminal rows; returns `health = "insufficient_data"` below that.
+
+**Metrics.**
+
+| Metric | What it tells you |
+|---|---|
+| Spearman ρ + p-value | Monotonic correlation between score and outcome; p < 0.05 means the correlation is statistically significant |
+| ECE (10-bin) | Mean absolute gap between predicted confidence and actual accuracy |
+| Bucket analysis | 4 human-readable bands — [0–0.30), [0.30–0.50), [0.50–0.70), [0.70–1.00] — with count and response rate per band |
+| Optimal threshold | Grid-search over [0.30, 0.90] (step 0.05) maximising F1; returns current F1, optimal F1, and Δ |
+| `threshold_recommendation` | Explicit string: either confirms `GROUNDING_THRESHOLD = 0.70` is near-optimal, or names a new value with the expected F1 gain |
+
+**Health.** `"good"` when is_predictive=True and optimal threshold is within 0.05 of current; `"needs_attention"` when the score is not predictive or a better threshold is available; `"insufficient_data"` when < 10 terminal samples exist.
+
+Admin endpoint: `GET /api/evaluation/grounding`
 
 ### 5.11 Module 9 — Interview Prep (descoped)
 
@@ -386,18 +484,18 @@ High semantic match, near-zero RL from 0% cohort response rate, low ranking. The
 | 3+5 — Matching + RL | Shipped | Yes (21 match tests + 7 RL tests) |
 | 4 — Ghost Shield | Shipped | Yes (12 ghost tests; formula, threshold, weights all unit-tested) |
 | 6 — Application Assistant | Shipped | Yes (30 application tests; grounding guard tested with mock LLM) |
-| 7 — Tracker / Outcomes | Shipped | Yes (22 tracker tests) |
+| 7 — Tracker / Outcomes | Shipped | Yes (25 tracker tests; duplicate outcome guard, word-boundary matching, terminal status all tested) |
 | 8 — Referral Finder | Shipped | Yes (31 referral tests + 42 normalizer tests) |
 | 9 — Interview Prep | Descoped | N/A |
-| 10 — Research Vertical | Shipped | Yes (15 research tests) |
-| 11 — Platform IQ Dashboard | Shipped | Yes (20 evaluation tests; 9 dashboard tests) |
+| 10 — Research Vertical | Shipped | Yes (25 research tests; state machine, rate limit, stale flag, pagination all tested) |
+| 11 — Platform IQ Dashboard | Shipped | Yes (19 evaluation tests; 9 dashboard tests; 27 matching eval tests; 18 grounding eval tests) |
 | 12 — Notifications | Shipped | Yes (7 notification tests) |
 
 ### 7.2 Code quality gates
 
 | Gate | Result | Command |
 |---|---|---|
-| Tests | **300 pass** | `uv run pytest` (300 items against live PostgreSQL + pgvector) |
+| Tests | **361 pass** | `uv run pytest` (361 items across 21 files against live PostgreSQL + pgvector) |
 | mypy --strict | **0 errors** (76 source files) | `uv run mypy app` |
 | ruff | **0 violations** | `uv run ruff check .` |
 | tsc | Clean (no output) | `cd frontend && npx tsc --noEmit` |
@@ -411,29 +509,32 @@ All metrics are derived from static code inspection or from running `scripts/see
 
 ### 8.1 Test suite breakdown
 
-| File | Tests |
-|---|---|
-| test_university_normalizer.py | 42 |
-| test_referrals.py | 31 |
-| test_applications.py | 30 |
-| test_tracker.py | 22 |
-| test_matches.py | 21 |
-| test_evaluation.py | 20 |
-| test_postings.py | 20 |
-| test_profile.py | 15 |
-| test_research.py | 15 |
-| test_ghost.py | 12 |
-| test_auth.py | 13 |
-| test_dashboard.py | 9 |
-| test_notifications.py | 7 |
-| test_response_likelihood.py | 7 |
-| test_embeddings.py | 5 |
-| test_llm.py | 5 |
-| test_health.py | 1 |
-| conftest.py | 1 |
-| **Total (pytest items)** | **300** |
+| File | Tests | Notes |
+|---|---|---|
+| test_university_normalizer.py | 42 | |
+| test_referrals.py | 31 | |
+| test_applications.py | 30 | |
+| test_eval_matching.py | 27 | **New** — 23 pure-unit (NDCG, Precision, MRR, cosine, fit_score, golden set, rank) + 4 async integration |
+| test_hardening_v2.py | 23 | Outreach + Application Assistant hardening |
+| test_tracker.py | 25 | +3 new: duplicate outcome 409, word-boundary matching, terminal status |
+| test_matches.py | 21 | |
+| test_postings.py | 20 | |
+| test_evaluation.py | 19 | Idempotency guard, admin-only gate, evaluate_now persistence |
+| test_eval_grounding.py | 18 | **New** — 14 pure-unit (ECE, threshold, Spearman, bucket) + 4 async DB integration |
+| test_profile.py | 15 | |
+| test_auth.py | 13 | |
+| test_ghost.py | 12 | |
+| test_dashboard.py | 9 | |
+| test_research.py | 25 | +10 new: state machine transitions, rate limit 429, stale flag, artifact persistence |
+| test_notifications.py | 7 | |
+| test_response_likelihood.py | 7 | |
+| test_shield_hardening.py | 6 | Ghost Shield signal-level hardening |
+| test_embeddings.py | 5 | |
+| test_llm.py | 5 | |
+| test_health.py | 1 | |
+| **Total (pytest items)** | **361** | 21 test files |
 
-Source: `uv run pytest --tb=short -q` — 300 passed in a live run against PostgreSQL + pgvector. Tests in `conftest.py` run real Alembic migrations at session start (subprocess call to `uv run alembic upgrade head`) so the test schema is always in sync with the migration history.
+Source: `uv run pytest --tb=short -q` — 361 passed in a live run against PostgreSQL + pgvector. Tests in `conftest.py` run real Alembic migrations at session start (subprocess call to `uv run alembic upgrade head`) so the test schema is always in sync with the migration history.
 
 ### 8.2 Ghost-flag distribution on seed dataset
 
@@ -508,7 +609,7 @@ The spread across archetypes is wide enough that the data-rich response likeliho
 | LLM | 5-provider fallback router | see §6.1 | Cost resilience; Groq free tier for dev; Gemini for quality |
 | Calibration | scikit-learn LogisticRegression | ≥1.0 | Lightweight Platt-scaling; temporal split; no GPU needed |
 | Auth | python-jose JWT + passlib argon2 + google-auth OIDC | — | argon2 = current password hashing best practice |
-| Migrations | Alembic async | 18 migrations | Incremental, reviewed, never auto-applied in production |
+| Migrations | Alembic async | 20 migrations | Incremental, reviewed, never auto-applied in production |
 | Linting | ruff | latest | Single-pass import, naming, and style enforcement |
 | Type checking | mypy --strict | — | Strict mode; catches service-layer contract violations at dev time |
 | Tests | pytest + pytest-asyncio + httpx | — | Async-native; integration tests hit real PostgreSQL |
@@ -634,7 +735,7 @@ docker run -d \
 ```bash
 uv sync --all-extras
 uv run alembic upgrade head
-# Expected: 18 migrations applied (0001_initial → 0018_posting_decode_cache)
+# Expected: 20 migrations applied (0001_initial → 0020_research_url_unique)
 ```
 
 ### Step 4: Seed demo data (required to observe ghost shield and evaluation)
@@ -746,19 +847,24 @@ app/
     matching_service.py         Matching + response likelihood (Modules 3+5)
     cohort_service.py           Cross-user aggregate response rates
     application_service.py      Application Assistant (grounding guard, ATS)
-    evaluation_service.py       Platform IQ — evaluate_now + build_history
-    research_service.py         Research opportunity ranking + pitch
-    university_normalizer.py    Deterministic name canonicalization (30-entry alias map)
-    ... (17 service files total)
+    evaluation_service.py            Platform IQ — evaluate_now + build_history
+    eval_matching_service.py         Offline golden-set matching eval (NDCG@3/5, Precision@3, MRR, weight grid-search)
+    eval_grounding_service.py        Live grounding calibration (Spearman ρ, ECE, threshold optimisation)
+    research_service.py              Research opportunity ranking + pitch + outreach state machine
+    research_aggregation_service.py  Research opportunity ingestion/aggregation
+    interest_aggregation_service.py  Interest-based live job fetching with TTL cache
+    university_normalizer.py         Deterministic name canonicalization (30-entry alias map)
+    contact_scraper.py               Alumni/contact data collection
+    ... (21 service files total)
   llm/
     router.py                   5-provider fallback chain (Gemini→Groq→OpenRouter→DeepSeek→Ollama)
     embeddings.py               Local all-MiniLM-L6-v2, EMBEDDING_DIM=384
-  api/v1/                       Thin routers — 54 endpoints, no business logic
-  sources/                      Ingestion adapters (Greenhouse, Ashby, Lever, RemoteOK, Remotive)
+  api/v1/                       Thin routers — 57 endpoints, no business logic
+  sources/                      8 ingestion adapters (Greenhouse, Ashby, Lever, RemoteOK, Remotive, JSearch, USAJobs, Adzuna)
 alembic/
   env.py                        Async Alembic env
-  versions/                     18 reviewed migrations (0001_initial → 0018_posting_decode_cache)
-tests/                          300 tests across 19 files (integration against real PostgreSQL)
+  versions/                     20 reviewed migrations (0001_initial → 0020_research_url_unique)
+tests/                          361 tests across 21 files (integration against real PostgreSQL)
 scripts/
   seed_demo.py                  14 users + 364 app-outcome pairs (RNG seed=42, deterministic)
   seed_research.py              20 research opportunities with pgvector embeddings
@@ -769,8 +875,9 @@ frontend/
   src/
     lib/api-client.ts           Single HTTP client; mock↔real via auth state or VITE_USE_MOCKS
     lib/mocks.ts                In-memory mock data for guest/unauthenticated mode
-    routes/                     TanStack Start file-based routes (11 routes)
-    components/nav.tsx          Auth-aware navigation (avatar + dropdown / guest badge)
+    routes/                     TanStack Start file-based routes (12 routes)
+    routes/blog.tsx             Full editorial blog post — origin story of the buildathon
+    components/nav.tsx          Auth-aware navigation (avatar + dropdown / guest badge); footer with Company column (Blog, GitHub, Contact)
   vite.config.ts                nitro cloudflare-pages preset for SSR Worker bundling
 API_CONTRACT.md                 Field-level API contract (single source of truth)
 CLAUDE.md                       Developer conventions
@@ -780,11 +887,12 @@ CLAUDE.md                       Developer conventions
 
 | Number | Value | Source |
 |---|---|---|
-| Test functions | 300 | `uv run pytest --tb=short -q` (live run against PostgreSQL + pgvector) |
+| Test functions | 361 | `uv run pytest --tb=short -q` (live run, 21 test files against PostgreSQL + pgvector) |
 | mypy source files | 76 | `uv run mypy app` output |
-| API endpoints | 54 | `@router.` decorators in `app/api/v1/*.py` |
-| Alembic migrations | 18 | `ls alembic/versions/*.py` |
-| Service files | 17 | `ls app/services/*.py` |
+| API endpoints | 57 | `@router.` decorators in `app/api/v1/*.py` |
+| Alembic migrations | 20 | `ls alembic/versions/*.py` (0001_initial → 0020_research_url_unique) |
+| Service files | 21 | `ls app/services/*.py` |
+| Ingestion source adapters | 8 | `ls app/sources/*.py` (excl. base, config, normalize) |
 | Ghost threshold | 0.38 | `ghost_service.py:32` |
 | Ghost weight: age | 0.30 | `ghost_service.py:24` |
 | Ghost weight: repost | 0.20 | `ghost_service.py:25` |

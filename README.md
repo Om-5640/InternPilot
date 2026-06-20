@@ -5,7 +5,7 @@
 > **Technical Report:** [DOCUMENTATION.md](DOCUMENTATION.md) — full architecture, every algorithm, engineering decisions with alternatives rejected, real metrics with provenance, and complete reproducibility instructions.
 
 [![Live Demo](https://img.shields.io/badge/live%20demo-internpilot.pages.dev-22c55e?style=flat-square&logo=cloudflare)](https://internpilot.pages.dev)
-[![Tests](https://img.shields.io/badge/tests-300%2F300%20passing-22c55e?style=flat-square)](#running-the-test-suite)
+[![Tests](https://img.shields.io/badge/tests-361%2F361%20passing-22c55e?style=flat-square)](#running-the-test-suite)
 [![mypy](https://img.shields.io/badge/mypy-strict%20·%2076%20files-3178c6?style=flat-square)](https://mypy.readthedocs.io/)
 [![ruff](https://img.shields.io/badge/ruff-clean-d7ff64?style=flat-square&labelColor=261230)](https://docs.astral.sh/ruff/)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
@@ -31,7 +31,7 @@ The internship application pipeline is broken at every layer — and the damage 
 
 InternPilot treats job hunting as a **prediction problem.** Every posting is scored for ghost probability before it reaches any feed. Every company is scored for response likelihood using real cross-user outcome data. Every application draft is constrained to what the profile can truthfully claim. A self-grading evaluation loop measures its own prediction accuracy against real outcomes on a fixed held-out test set — and reports an honest learning curve as the cohort grows.
 
-This is not a chatbot wrapper. The core intelligence is a multi-signal ranking engine with a feedback loop that improves as real outcomes accumulate.
+This is not a chatbot wrapper. The core intelligence is a multi-signal ranking engine with a feedback loop that improves as real outcomes accumulate. A two-service offline evaluation system — covering matching quality and grounding calibration — makes prediction accuracy inspectable, comparable across runs, and actionable.
 
 ---
 
@@ -47,7 +47,7 @@ Every posting is scored by a weighted model of five independent signals before i
 |--------|--------|-------|
 | Posting age | 0.30 | Step function: 0–14 d → 0.0, 15–29 d → 0.2, 30–59 d → 0.5, 60–89 d → 0.7, ≥90 d → 1.0 |
 | Cross-board repost | 0.20 | `source_sightings` counter: 1 board → 0.0, 2 boards → 0.4, 3+ boards → 0.8 |
-| JD vagueness | 0.25 | Word count + requirement count + pipeline phrases − tech-term specificity bonus (42 terms) |
+| JD vagueness | 0.25 | Word count + requirement count + pipeline phrases − tech-term specificity bonus (42 terms); word-boundary guard prevents false matches (e.g. "AI" inside "SAIL") |
 | Company ghost history | 0.15 | Rolling average ghost score across all company postings |
 | Cohort non-response | 0.10 | Active only when ≥5 batchmates applied to the same company |
 
@@ -75,7 +75,15 @@ RL = 0.65 × freshness + 0.35 × (1 − ghost_history_score)
 
 `CohortService` writes exactly **two scalars** to the `companies` table: `cohort_applied_count` and `responsiveness_score`. No individual user's application content, status, or `user_id` is ever read by another user's session. The minimum threshold of 5 prevents a single unlucky applicant from mislabeling a genuinely responsive company. The match explanation surfaces this signal in plain English — "Low reply rate: 0 of 6 batchmates heard back" — regardless of how high the semantic similarity score is.
 
-### 3. Self-Improving Platform IQ — honest evaluation methodology
+### 3. Offline Eval System — matching quality and grounding calibration
+
+Two admin-gated evaluation services make prediction accuracy inspectable and actionable at any time.
+
+**Matching quality eval** (`POST /evaluation/matching`): runs offline against a 4-profile × 8-opportunity golden set (32 hand-labeled relevance pairs, 0–3 scale). Computes NDCG@3, NDCG@5, Precision@3, and MRR averaged across all profile archetypes. A weight grid-search tries `SEMANTIC_WEIGHT` in {0.40…0.90} (step 0.05) to find the pair maximising NDCG@5, then returns an explicit percentage-gain recommendation. Regression detection compares the current run's NDCG@5 against the previous one and flags any drop > 2 pp. Fully offline — no DB, no live user data, no LLM. Per-profile breakdown shows which archetype the system handles best/worst, with a `top_match_is_correct` flag for each.
+
+**Grounding score calibration** (`GET /evaluation/grounding`): joins all research-pitch Artifacts (with `grounding_score`) against terminal-state ResearchOutreach records to measure whether a higher score actually predicts a professor reply. Returns Spearman ρ + p-value, ECE (10-bin), a 4-bucket response-rate breakdown ([0–0.30), [0.30–0.50), [0.50–0.70), [0.70–1.00]), F1 at the current threshold vs. the grid-searched optimum, and an explicit `threshold_recommendation` string — either confirming the current `GROUNDING_THRESHOLD = 0.70` or naming a new value with the expected F1 gain. Requires ≥ 10 terminal outcomes; returns `health = insufficient_data` below that.
+
+### 4. Self-Improving Platform IQ — honest evaluation methodology
 
 The platform grades its own predictions against real outcomes using a rigorous, audited methodology.
 
@@ -111,14 +119,14 @@ All 12 modules are built, tested, and deployed. No planned-but-unshipped feature
 |--------|--------|--------------|
 | 0 — Auth | **Shipped** | Signup/login, JWT (python-jose), Google OIDC, argon2 password hashing (Password Hashing Competition winner), per-user data isolation enforced at service layer |
 | 1 — Career Twin | **Shipped** | Résumé parsing via LLM extraction (JSON prompt), GitHub connect, 384-dim profile embedding (local, free), `profile_strength` score (0–100), gap detection against top-50 matches |
-| 2 — Ingestion | **Shipped** | 5 source adapters (Greenhouse, Ashby, Lever, RemoteOK, Remotive), SHA-1 dedup key, `source_sightings` counter incremented at ingest rather than aggregated at read time |
+| 2 — Ingestion | **Shipped** | 8 source adapters — Greenhouse, Ashby, Lever, RemoteOK, Remotive, JSearch (RapidAPI; aggregates LinkedIn/Indeed/Glassdoor), USAJobs.gov (federal internship programs), Adzuna (multi-country, all industries) — SHA-1 dedup key, `source_sightings` counter incremented at ingest |
 | 3+5 — Match & Rank | **Shipped** | pgvector HNSW cosine search, `match_score = 0.70×semantic + 0.30×skill`, two-path response likelihood, `expected_value` ranking key, deterministic match explanations (no LLM on critical path) |
 | 4 — Ghost Shield | **Shipped** | 5-signal weighted model, no LLM calls, O(n) per run, two-layer defense with response likelihood catching deceptive posts |
 | 6 — Application Assistant | **Shipped** | Cover letter / email / referral intro, profile whitelist, grounding guard with regeneration loop (not post-processing), ATS scoring (deterministic, no LLM), Job Decoder |
 | 7 — Tracker / Outcomes | **Shipped** | Full status FSM: `saved → applied → viewed → responded → interview → offer / rejected / ghosted`, follow-up draft generation, Gmail sync (explicit consent-gated) |
 | 8 — Referral Finder | **Shipped** | Alumni matching by company + canonical university name, deterministic canonicalization (30-entry alias map, 42 tests), LLM-drafted intro with same grounding guard |
-| 10 — Research Vertical | **Shipped** | Research opportunity ranking via embedding match on `research_interests`, cold-email pitch generation with same anti-fabrication guard as applications, outreach tracking |
-| 11 — Platform IQ | **Shipped** | Pipeline funnel, response rate, ghosts avoided, time saved, full learning curve (evaluate_now + build_history with temporal split) |
+| 10 — Research Vertical | **Shipped** | Research opportunity ranking via embedding match on `research_interests`, cold-email pitch generation with same anti-fabrication guard; outreach state machine (suggested→contacted→replied/declined/no_response) with `contacted_at`/`replied_at` timestamps, 5-pitch/hr rate limit, UNIQUE(user_id, opportunity_id) constraint, paginated list |
+| 11 — Platform IQ | **Shipped** | Pipeline funnel, response rate, ghosts avoided, time saved, full learning curve (evaluate_now + build_history with temporal split); idempotent insufficient_data guard; offline matching-quality eval (NDCG@3/5, MRR, weight grid-search); live grounding calibration (Spearman ρ, ECE, threshold recommendation) |
 | 12 — Notifications | **Shipped** | 4 types: `followup_due`, `response`, `status_change`, `new_match`; idempotent generation (content-hash dedup), user-scoped |
 
 **Test suite: 300 tests across 19 files.** Integration tests hit a real PostgreSQL + pgvector instance with real Alembic migrations applied at session start.
@@ -180,7 +188,7 @@ Data flows from five aggregated sources through deduplication into PostgreSQL wi
 | LLM | 5-provider fallback router (Gemini → Groq → OpenRouter → DeepSeek → Ollama) | Any single provider outage is transparent; Groq free tier handles dev; no hard-fail |
 | Calibration | scikit-learn LogisticRegression | Lightweight Platt-scaling; temporal split; no GPU |
 | Auth | python-jose JWT + passlib argon2 + google-auth OIDC | argon2 is memory-hard; Password Hashing Competition winner |
-| Migrations | Alembic async (18 migrations) | Incremental, reviewed, never auto-applied in production |
+| Migrations | Alembic async (20 migrations) | Incremental, reviewed, never auto-applied in production |
 | Package manager | uv | Deterministic lockfile; `uv sync --frozen --no-cache` in Docker |
 | Types | mypy --strict (76 files) | Catches service-layer contract violations before tests; structural isolation enforcement |
 | Tests | pytest + pytest-asyncio + httpx (300 tests) | Async-native; integration against real PostgreSQL + pgvector |
@@ -225,12 +233,12 @@ All numbers are real, traced to source or test output. No invented benchmarks.
 
 | Measurement | Value | Source |
 |-------------|-------|--------|
-| Test suite | **300 / 300 passing** | `uv run pytest` against live PostgreSQL + pgvector |
+| Test suite | **361 / 361 passing** | `uv run pytest` against live PostgreSQL + pgvector (21 test files) |
 | mypy --strict | **0 errors, 76 source files** | `uv run mypy app` |
 | ruff | **0 violations** | `uv run ruff check .` |
-| Alembic migrations | **18** (0001–0018) | `alembic/versions/` |
-| API endpoints | **54** | `@router.` decorators in `app/api/v1/*.py` |
-| Service files | **17** | `app/services/*.py` |
+| Alembic migrations | **20** (0001–0020) | `alembic/versions/` |
+| API endpoints | **57** | `@router.` decorators in `app/api/v1/*.py` |
+| Service files | **21** | `app/services/*.py` |
 | Platform IQ (364 pairs) | **66.7** | `EvaluationService.evaluate_now()` via `smoke_replay.py` |
 | Response Brier score | **0.226** | same |
 | Response AUC-ROC | **0.769** | same |
@@ -276,6 +284,14 @@ GROQ_API_KEY=
 OPENROUTER_API_KEY=
 GOOGLE_CLIENT_ID=
 CORS_ORIGINS=http://localhost:5173
+
+# Additional ingestion sources (all optional — source is silently skipped if key absent)
+JSEARCH_API_KEY=        # RapidAPI key — aggregates LinkedIn, Indeed, Glassdoor
+USAJOBS_API_KEY=        # register free at developer.usajobs.gov
+USAJOBS_EMAIL=          # email used to register at USAJobs
+ADZUNA_APP_ID=          # register free at developer.adzuna.com
+ADZUNA_APP_KEY=
+ADZUNA_COUNTRY=us       # or gb, de, au, in, ca — sets the Adzuna regional endpoint
 ```
 
 ### 2. Start PostgreSQL with pgvector
@@ -292,7 +308,7 @@ docker run -d \
 
 ```bash
 uv sync --all-extras
-uv run alembic upgrade head   # applies all 18 migrations; first one runs CREATE EXTENSION IF NOT EXISTS vector
+uv run alembic upgrade head   # applies all 20 migrations; first one runs CREATE EXTENSION IF NOT EXISTS vector
 ```
 
 ### 4. Seed demo data
@@ -357,33 +373,40 @@ app/
   models/                   13 SQLAlchemy ORM models (TimestampMixin on all: UUID id, created_at, updated_at)
   schemas/                  Pydantic v2 request/response schemas (one file per module)
   services/
-    base.py                 BaseService — data-isolation scaffold (28 lines, structural enforcement)
-    ghost_service.py        5-signal Ghost-Job Shield (no LLM, O(n))
-    matching_service.py     Semantic ranking + response likelihood (Modules 3+5 co-located)
-    cohort_service.py       Cross-user aggregate response rates (2 scalars only)
-    application_service.py  Grounded generation + ATS + anti-fabrication regeneration loop
-    evaluation_service.py   Platform IQ — evaluate_now + build_history (temporal split, asserted disjoint)
-    research_service.py     Research opportunity ranking + cold-email pitch
-    university_normalizer.py  Deterministic canonicalization (30 entries, pure function, 42 tests)
-    ... (17 service files total)
+    base.py                      BaseService — data-isolation scaffold (28 lines, structural enforcement)
+    ghost_service.py             5-signal Ghost-Job Shield (no LLM, O(n))
+    matching_service.py          Semantic ranking + response likelihood (Modules 3+5 co-located)
+    cohort_service.py            Cross-user aggregate response rates (2 scalars only)
+    application_service.py       Grounded generation + ATS + anti-fabrication regeneration loop
+    evaluation_service.py        Platform IQ — evaluate_now + build_history (temporal split, asserted disjoint)
+    eval_matching_service.py     Offline golden-set matching eval (NDCG@3/5, Precision@3, MRR, weight grid-search)
+    eval_grounding_service.py    Live grounding calibration (Spearman ρ, ECE, bucket analysis, threshold optimisation)
+    research_service.py          Research opportunity ranking + cold-email pitch + outreach state machine
+    research_aggregation_service.py  Research opportunity ingestion and aggregation
+    interest_aggregation_service.py  Live interest-based job fetching with TTL cache
+    university_normalizer.py     Deterministic canonicalization (30 entries, pure function, 42 tests)
+    contact_scraper.py           Alumni/contact data collection
+    ... (21 service files total)
   llm/
     router.py               5-provider fallback chain (Gemini→Groq→OpenRouter→DeepSeek→Ollama)
     embeddings.py           Local all-MiniLM-L6-v2, EMBEDDING_DIM=384
-  api/v1/                   Thin routers — 54 endpoints, zero business logic
-  sources/                  Ingestion adapters (Greenhouse, Ashby, Lever, RemoteOK, Remotive)
-alembic/versions/           18 reviewed migrations (0001_initial → 0018_posting_decode_cache)
-tests/                      300 tests across 19 files (integration against real PostgreSQL + pgvector)
+  api/v1/                   Thin routers — 57 endpoints, zero business logic
+  sources/                  8 ingestion adapters (Greenhouse, Ashby, Lever, RemoteOK, Remotive, JSearch, USAJobs, Adzuna)
+alembic/versions/           20 reviewed migrations (0001_initial → 0020_research_url_unique)
+tests/                      361 tests across 21 files (integration against real PostgreSQL + pgvector)
 scripts/
   seed_demo.py              14 users + 364 app-outcome pairs (deterministic RNG seed=42)
   seed_research.py          20 research opportunities with pgvector embeddings
-  probe_refresh.py          Aggregate real postings from all 5 sources
+  probe_refresh.py          Aggregate real postings from all 8 sources
   smoke_replay.py           Platform IQ learning curve (evaluate_now + build_history, 8 checkpoints)
   journey_smoke.py          12-step end-to-end API smoke test
 frontend/
   src/lib/api-client.ts     Single HTTP client — mock/real via auth state or VITE_USE_MOCKS
   src/lib/mocks.ts          In-memory mock data for guest/unauthenticated mode
-  src/routes/               TanStack Start file-based routes (11 routes)
+  src/routes/               TanStack Start file-based routes (12 routes, including /blog)
+  src/routes/blog.tsx       Full editorial blog post page — origin story of the buildathon
   vite.config.ts            nitro cloudflare-pages preset for SSR Worker bundling
+Blog.md                     Origin-story blog post: How a WhatsApp Rant Turned Into InternPilot
 API_CONTRACT.md             Field-level API contract — single source of truth; change here first
 CLAUDE.md                   Developer conventions — stack, patterns, module discipline, migration commands
 ```
